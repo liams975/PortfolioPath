@@ -1,13 +1,14 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart, PieChart, Pie, Cell, ScatterChart, Scatter, ReferenceLine } from 'recharts';
-import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, FileText, GitCompare, Sliders, Scale } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, FileText, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, CheckCircle, Package, RefreshCw } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useTheme } from './context/ThemeContext';
 import AuthModal from './components/AuthModal';
 import SavedPortfolios from './components/SavedPortfolios';
 import { TickerInput } from './components/TickerInput';
 import { exportToCSV, exportToPDF } from './utils/exportUtils';
+import { savePortfolioLocal, loadPortfoliosLocal, cacheSimulationResults, getCachedSimulation, savePreferences, loadPreferences } from './services/cache';
 
 /**
  * ============================================================================
@@ -229,6 +230,220 @@ const assetDatabase = {
   'BND': { mean: 0.0001, vol: 0.004, name: 'Bond Index ETF' },
   'GLD': { mean: 0.0002, vol: 0.012, name: 'Gold ETF' },
   'IWM': { mean: 0.0003, vol: 0.016, name: 'Small Cap ETF' },
+};
+
+// ============================================================================
+// PRESET PORTFOLIO TEMPLATES
+// ============================================================================
+
+const PRESET_PORTFOLIOS = {
+  'classic_60_40': {
+    name: 'Classic 60/40',
+    description: 'Traditional balanced portfolio',
+    portfolio: [
+      { ticker: 'SPY', weight: 0.6 },
+      { ticker: 'BND', weight: 0.4 }
+    ],
+    risk: 'Moderate'
+  },
+  'aggressive_growth': {
+    name: 'Aggressive Growth',
+    description: 'High risk, high reward tech focus',
+    portfolio: [
+      { ticker: 'QQQ', weight: 0.5 },
+      { ticker: 'AAPL', weight: 0.2 },
+      { ticker: 'TSLA', weight: 0.15 },
+      { ticker: 'NVDA', weight: 0.15 }
+    ],
+    risk: 'High'
+  },
+  'conservative': {
+    name: 'Conservative',
+    description: 'Capital preservation focus',
+    portfolio: [
+      { ticker: 'BND', weight: 0.5 },
+      { ticker: 'SPY', weight: 0.3 },
+      { ticker: 'GLD', weight: 0.2 }
+    ],
+    risk: 'Low'
+  },
+  'all_weather': {
+    name: 'All Weather',
+    description: 'Ray Dalio inspired diversification',
+    portfolio: [
+      { ticker: 'SPY', weight: 0.3 },
+      { ticker: 'TLT', weight: 0.4 },
+      { ticker: 'GLD', weight: 0.15 },
+      { ticker: 'VWO', weight: 0.15 }
+    ],
+    risk: 'Moderate'
+  },
+  'dividend_income': {
+    name: 'Dividend Income',
+    description: 'Stable dividend-paying stocks',
+    portfolio: [
+      { ticker: 'VTI', weight: 0.4 },
+      { ticker: 'JNJ', weight: 0.2 },
+      { ticker: 'PG', weight: 0.2 },
+      { ticker: 'BND', weight: 0.2 }
+    ],
+    risk: 'Low-Moderate'
+  },
+  'tech_heavy': {
+    name: 'Tech Heavy',
+    description: 'Technology sector concentration',
+    portfolio: [
+      { ticker: 'QQQ', weight: 0.4 },
+      { ticker: 'MSFT', weight: 0.2 },
+      { ticker: 'GOOGL', weight: 0.2 },
+      { ticker: 'META', weight: 0.2 }
+    ],
+    risk: 'High'
+  },
+  'global_diversified': {
+    name: 'Global Diversified',
+    description: 'International exposure',
+    portfolio: [
+      { ticker: 'VTI', weight: 0.4 },
+      { ticker: 'VEA', weight: 0.3 },
+      { ticker: 'VWO', weight: 0.2 },
+      { ticker: 'BND', weight: 0.1 }
+    ],
+    risk: 'Moderate'
+  }
+};
+
+// ============================================================================
+// STRESS TEST SCENARIOS
+// ============================================================================
+
+const STRESS_SCENARIOS = {
+  '2008_crash': {
+    name: '2008 Financial Crisis',
+    description: 'Simulate market conditions during the 2008 crash',
+    modifier: { recession: true },
+    icon: '📉'
+  },
+  'covid_crash': {
+    name: 'COVID-19 Crash',
+    description: 'March 2020 style rapid drawdown',
+    modifier: { volatilitySpike: true, recession: true },
+    icon: '🦠'
+  },
+  'bull_run': {
+    name: '2021 Bull Market',
+    description: 'Post-pandemic recovery rally',
+    modifier: { bullMarket: true },
+    icon: '🐂'
+  },
+  'stagflation': {
+    name: 'Stagflation',
+    description: '1970s style inflation + stagnation',
+    modifier: { recession: true, volatilitySpike: true },
+    icon: '📊'
+  },
+  'normal': {
+    name: 'Normal Conditions',
+    description: 'Typical market environment',
+    modifier: {},
+    icon: '📈'
+  }
+};
+
+// ============================================================================
+// GOAL PROBABILITY CALCULATOR
+// ============================================================================
+
+const calculateGoalProbability = (simulations, targetValue) => {
+  if (!simulations || simulations.length === 0) return null;
+  
+  const finalValues = simulations.map(path => {
+    const lastPoint = path[path.length - 1];
+    return lastPoint ? lastPoint.value : 0;
+  });
+  
+  const successCount = finalValues.filter(v => v >= targetValue).length;
+  const probability = (successCount / finalValues.length) * 100;
+  
+  // Find the time when probability first exceeds 50%
+  let medianCrossingDay = null;
+  const days = simulations[0]?.length || 0;
+  
+  for (let day = 0; day < days; day++) {
+    const valuesAtDay = simulations.map(path => path[day]?.value || 0);
+    const aboveTarget = valuesAtDay.filter(v => v >= targetValue).length;
+    if (aboveTarget / simulations.length >= 0.5) {
+      medianCrossingDay = day;
+      break;
+    }
+  }
+  
+  return {
+    probability: probability.toFixed(1),
+    successCount,
+    totalSimulations: simulations.length,
+    medianCrossingDay
+  };
+};
+
+// ============================================================================
+// DRAWDOWN CALCULATOR
+// ============================================================================
+
+const calculateDrawdownMetrics = (simulations) => {
+  if (!simulations || simulations.length === 0) return null;
+  
+  const drawdownData = [];
+  const maxDrawdowns = [];
+  
+  // Calculate drawdown for each simulation
+  simulations.forEach(path => {
+    let peak = path[0]?.value || 0;
+    let maxDrawdown = 0;
+    
+    path.forEach(point => {
+      if (point.value > peak) peak = point.value;
+      const drawdown = (peak - point.value) / peak;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    });
+    
+    maxDrawdowns.push(maxDrawdown * 100);
+  });
+  
+  maxDrawdowns.sort((a, b) => a - b);
+  
+  // Calculate average drawdown path
+  const days = simulations[0]?.length || 0;
+  const step = Math.max(1, Math.ceil(days / 50));
+  
+  for (let day = 0; day < days; day += step) {
+    const drawdownsAtDay = simulations.map(path => {
+      let peak = path[0]?.value || 0;
+      for (let d = 0; d <= day; d++) {
+        if (path[d]?.value > peak) peak = path[d].value;
+      }
+      return path[day] ? ((peak - path[day].value) / peak) * 100 : 0;
+    }).sort((a, b) => a - b);
+    
+    drawdownData.push({
+      day,
+      p10: drawdownsAtDay[Math.floor(drawdownsAtDay.length * 0.1)] || 0,
+      median: drawdownsAtDay[Math.floor(drawdownsAtDay.length * 0.5)] || 0,
+      p90: drawdownsAtDay[Math.floor(drawdownsAtDay.length * 0.9)] || 0,
+      worst: drawdownsAtDay[drawdownsAtDay.length - 1] || 0
+    });
+  }
+  
+  return {
+    data: drawdownData,
+    stats: {
+      median: maxDrawdowns[Math.floor(maxDrawdowns.length * 0.5)],
+      p90: maxDrawdowns[Math.floor(maxDrawdowns.length * 0.9)],
+      p95: maxDrawdowns[Math.floor(maxDrawdowns.length * 0.95)],
+      worst: maxDrawdowns[maxDrawdowns.length - 1],
+      avgMaxDrawdown: maxDrawdowns.reduce((a, b) => a + b, 0) / maxDrawdowns.length
+    }
+  };
 };
 
 // Correlation matrix (simplified - real would use historical data)
@@ -521,6 +736,20 @@ const PortfolioPath = () => {
   // NEW: Efficient frontier
   const [showEfficientFrontier, setShowEfficientFrontier] = useState(false);
   
+  // NEW: Goal Probability
+  const [goalAmount, setGoalAmount] = useState(15000);
+  const [showGoalProbability, setShowGoalProbability] = useState(true);
+  
+  // NEW: Simulation loading state
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simulationProgress, setSimulationProgress] = useState(0);
+  
+  // NEW: Selected preset
+  const [selectedPreset, setSelectedPreset] = useState(null);
+  
+  // NEW: Active stress scenario
+  const [activeStressScenario, setActiveStressScenario] = useState('normal');
+  
   // Theme
   const theme = useTheme();
   const { isDark, toggleTheme, colors } = theme;
@@ -570,29 +799,41 @@ const PortfolioPath = () => {
   const totalWeight = portfolio.reduce((sum, p) => sum + p.weight, 0);
   const totalComparisonWeight = comparisonPortfolio.reduce((sum, p) => sum + p.weight, 0);
 
+  // Load preset portfolio
+  const applyPreset = (presetKey) => {
+    const preset = PRESET_PORTFOLIOS[presetKey];
+    if (preset) {
+      setPortfolio([...preset.portfolio]);
+      setSelectedPreset(presetKey);
+    }
+  };
+  
+  // Apply stress scenario
+  const applyStressScenario = (scenarioKey) => {
+    const scenario = STRESS_SCENARIOS[scenarioKey];
+    if (scenario) {
+      setScenarios(scenario.modifier);
+      setActiveStressScenario(scenarioKey);
+    }
+  };
+
   const runSimulation = () => {
     if (Math.abs(totalWeight - 1) > 0.01) {
       alert('Portfolio weights must sum to 100%');
       return;
     }
     
-    const results = runAdvancedMonteCarloSimulation(
-      portfolio,
-      initialValue,
-      timeHorizon,
-      numSimulations,
-      {
-        ...advancedOptions,
-        scenarios
-      }
-    );
+    setIsSimulating(true);
+    setSimulationProgress(0);
     
-    setSimulationResults(results);
-    
-    // Run comparison simulation if in comparison mode
-    if (comparisonMode && Math.abs(totalComparisonWeight - 1) <= 0.01) {
-      const compResults = runAdvancedMonteCarloSimulation(
-        comparisonPortfolio,
+    // Use setTimeout to allow UI to update before heavy computation
+    setTimeout(() => {
+      const progressInterval = setInterval(() => {
+        setSimulationProgress(prev => Math.min(prev + 5, 95));
+      }, 100);
+      
+      const results = runAdvancedMonteCarloSimulation(
+        portfolio,
         initialValue,
         timeHorizon,
         numSimulations,
@@ -601,12 +842,34 @@ const PortfolioPath = () => {
           scenarios
         }
       );
-      setComparisonResults(compResults);
-    } else {
-      setComparisonResults(null);
-    }
-    
-    setView('results');
+      
+      clearInterval(progressInterval);
+      setSimulationProgress(100);
+      setSimulationResults(results);
+      
+      // Cache results
+      cacheSimulationResults(getCurrentPortfolioData(), results, calculateRiskMetrics(results, initialValue));
+      
+      // Run comparison simulation if in comparison mode
+      if (comparisonMode && Math.abs(totalComparisonWeight - 1) <= 0.01) {
+        const compResults = runAdvancedMonteCarloSimulation(
+          comparisonPortfolio,
+          initialValue,
+          timeHorizon,
+          numSimulations,
+          {
+            ...advancedOptions,
+            scenarios
+          }
+        );
+        setComparisonResults(compResults);
+      } else {
+        setComparisonResults(null);
+      }
+      
+      setIsSimulating(false);
+      setView('results');
+    }, 50);
   };
 
   const loadPortfolio = (savedData) => {
@@ -637,6 +900,18 @@ const PortfolioPath = () => {
     if (!comparisonResults) return null;
     return calculateRiskMetrics(comparisonResults, initialValue);
   }, [comparisonResults, initialValue]);
+
+  // Goal probability calculation
+  const goalProbability = useMemo(() => {
+    if (!simulationResults || !goalAmount) return null;
+    return calculateGoalProbability(simulationResults, goalAmount);
+  }, [simulationResults, goalAmount]);
+
+  // Drawdown metrics calculation
+  const drawdownMetrics = useMemo(() => {
+    if (!simulationResults) return null;
+    return calculateDrawdownMetrics(simulationResults);
+  }, [simulationResults]);
 
   // Dynamic percentile data based on slider
   const dynamicPercentileData = useMemo(() => {
@@ -953,6 +1228,65 @@ const PortfolioPath = () => {
             />
           )}
 
+          {/* Preset Portfolio Templates */}
+          <div className={`mb-4 ${colors.card} rounded-xl p-4 border`}>
+            <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
+              <Package className="w-4 h-4 text-rose-400" />
+              Quick Start Templates
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+              {Object.entries(PRESET_PORTFOLIOS).map(([key, preset]) => (
+                <button
+                  key={key}
+                  onClick={() => applyPreset(key)}
+                  className={`p-3 rounded-lg border transition-all text-left ${
+                    selectedPreset === key 
+                      ? 'bg-rose-600/20 border-rose-500/50 ring-1 ring-rose-500/30' 
+                      : `${colors.buttonSecondary} hover:border-rose-500/30`
+                  }`}
+                >
+                  <div className={`text-xs font-medium ${selectedPreset === key ? 'text-rose-400' : colors.text}`}>
+                    {preset.name}
+                  </div>
+                  <div className={`text-xs ${colors.textSubtle} mt-1`}>{preset.risk}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Stress Test Scenarios */}
+          <div className={`mb-4 ${colors.card} rounded-xl p-4 border`}>
+            <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              Stress Test Scenarios
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(STRESS_SCENARIOS).map(([key, scenario]) => (
+                <button
+                  key={key}
+                  onClick={() => applyStressScenario(key)}
+                  className={`px-4 py-2 rounded-lg border transition-all flex items-center gap-2 ${
+                    activeStressScenario === key 
+                      ? 'bg-amber-600/20 border-amber-500/50 ring-1 ring-amber-500/30' 
+                      : `${colors.buttonSecondary} hover:border-amber-500/30`
+                  }`}
+                >
+                  <span>{scenario.icon}</span>
+                  <span className={`text-sm ${activeStressScenario === key ? 'text-amber-400' : colors.text}`}>
+                    {scenario.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {activeStressScenario !== 'normal' && (
+              <div className={`mt-3 p-2 rounded-lg ${isDark ? 'bg-amber-900/20' : 'bg-amber-50'} border border-amber-500/30`}>
+                <p className={`text-xs ${colors.textMuted}`}>
+                  <span className="text-amber-400 font-medium">Active:</span> {STRESS_SCENARIOS[activeStressScenario].description}
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Main Grid Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Portfolio Config - Left Panel */}
@@ -1217,13 +1551,67 @@ const PortfolioPath = () => {
             </div>
           </div>
 
+          {/* Goal Target Input */}
+          <div className={`p-4 ${colors.card} ${colors.border} rounded-xl mb-4`}>
+            <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
+              <Crosshair className="w-4 h-4 text-emerald-400" />
+              Goal Planning
+            </h3>
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <label className={`text-xs ${colors.textMuted} uppercase tracking-wider`}>Target Amount</label>
+                <div className="flex items-center mt-1">
+                  <span className={`${colors.textMuted} mr-2`}>$</span>
+                  <input
+                    type="number"
+                    value={goalAmount}
+                    onChange={(e) => setGoalAmount(parseFloat(e.target.value) || 0)}
+                    className={`flex-1 px-3 py-2 ${colors.input} ${colors.border} rounded-lg text-sm font-mono ${colors.text}`}
+                    placeholder="15000"
+                  />
+                </div>
+              </div>
+              <div className="text-center">
+                <div className={`text-xs ${colors.textMuted} uppercase tracking-wider`}>Goal vs Initial</div>
+                <div className={`text-lg font-bold ${goalAmount > initialValue ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {goalAmount > 0 ? `+${(((goalAmount - initialValue) / initialValue) * 100).toFixed(0)}%` : '0%'}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Run Simulation Button */}
           <button
             onClick={runSimulation}
-            className={`w-full mt-6 py-4 ${colors.button} rounded-xl transition-all duration-200 font-bold text-lg shadow-xl shadow-rose-900/30 hover:shadow-rose-600/40 border border-rose-500/30 text-white`}
+            disabled={isSimulating}
+            className={`w-full mt-6 py-4 ${colors.button} rounded-xl transition-all duration-200 font-bold text-lg shadow-xl shadow-rose-900/30 hover:shadow-rose-600/40 border border-rose-500/30 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3`}
           >
-            {comparisonMode ? 'Run Comparison Simulation' : 'Run Monte Carlo Simulation'}
+            {isSimulating ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Running Simulations... {simulationProgress}%</span>
+              </>
+            ) : (
+              <>
+                {comparisonMode ? 'Run Comparison Simulation' : 'Run Monte Carlo Simulation'}
+              </>
+            )}
           </button>
+          
+          {/* Progress bar during simulation */}
+          {isSimulating && (
+            <div className="mt-3">
+              <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-rose-500 to-red-500 transition-all duration-200"
+                  style={{ width: `${simulationProgress}%` }}
+                />
+              </div>
+              <p className={`text-xs ${colors.textMuted} mt-2 text-center`}>
+                Processing {numSimulations.toLocaleString()} simulations over {timeHorizon} days...
+              </p>
+            </div>
+          )}
         </div>
         
         {/* Auth Modal */}
@@ -1385,6 +1773,70 @@ const PortfolioPath = () => {
             </div>
           )}
 
+          {/* Goal Probability Card */}
+          {goalProbability && goalAmount > 0 && (
+            <div className={`mb-4 p-4 ${colors.card} ${colors.border} rounded-lg`}>
+              <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
+                <Crosshair className="w-4 h-4 text-emerald-400" />
+                Goal Probability Analysis
+              </h3>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className={`p-3 rounded-lg ${parseFloat(goalProbability.probability) >= 70 ? 'bg-emerald-900/20 border-emerald-800/50' : parseFloat(goalProbability.probability) >= 40 ? 'bg-amber-900/20 border-amber-800/50' : 'bg-red-900/20 border-red-800/50'} border`}>
+                  <span className={`text-xs ${colors.muted}`}>Probability of Reaching ${goalAmount.toLocaleString()}</span>
+                  <p className={`text-3xl font-bold ${parseFloat(goalProbability.probability) >= 70 ? 'text-emerald-400' : parseFloat(goalProbability.probability) >= 40 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {goalProbability.probability}%
+                  </p>
+                </div>
+                <div className={`p-3 ${isDark ? 'bg-zinc-800/30' : 'bg-gray-100'} rounded-lg`}>
+                  <span className={`text-xs ${colors.muted}`}>Successful Simulations</span>
+                  <p className={`text-xl font-bold ${colors.text}`}>
+                    {goalProbability.successCount.toLocaleString()} / {goalProbability.totalSimulations.toLocaleString()}
+                  </p>
+                </div>
+                <div className={`p-3 ${isDark ? 'bg-zinc-800/30' : 'bg-gray-100'} rounded-lg`}>
+                  <span className={`text-xs ${colors.muted}`}>Target Return Needed</span>
+                  <p className={`text-xl font-bold ${colors.text}`}>
+                    +{(((goalAmount - initialValue) / initialValue) * 100).toFixed(1)}%
+                  </p>
+                </div>
+                <div className={`p-3 ${isDark ? 'bg-zinc-800/30' : 'bg-gray-100'} rounded-lg`}>
+                  <span className={`text-xs ${colors.muted}`}>Median Outcome</span>
+                  <p className={`text-xl font-bold ${riskMetrics.percentiles.p50 >= goalAmount ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    ${riskMetrics.percentiles.p50.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+              </div>
+              {/* Probability gauge */}
+              <div className="mt-4">
+                <div className="flex justify-between text-xs text-zinc-500 mb-1">
+                  <span>0%</span>
+                  <span>50%</span>
+                  <span>100%</span>
+                </div>
+                <div className="h-3 bg-zinc-800 rounded-full overflow-hidden relative">
+                  <div 
+                    className={`h-full transition-all duration-500 ${
+                      parseFloat(goalProbability.probability) >= 70 
+                        ? 'bg-gradient-to-r from-emerald-600 to-emerald-400' 
+                        : parseFloat(goalProbability.probability) >= 40 
+                          ? 'bg-gradient-to-r from-amber-600 to-amber-400'
+                          : 'bg-gradient-to-r from-red-600 to-red-400'
+                    }`}
+                    style={{ width: `${goalProbability.probability}%` }}
+                  />
+                  <div className="absolute top-0 left-1/2 w-0.5 h-full bg-zinc-600" />
+                </div>
+                <p className={`text-xs ${colors.textMuted} mt-2 text-center`}>
+                  {parseFloat(goalProbability.probability) >= 70 
+                    ? '✅ Strong likelihood of reaching your goal' 
+                    : parseFloat(goalProbability.probability) >= 40 
+                      ? '⚠️ Moderate chance - consider adjusting strategy'
+                      : '❌ Low probability - increase time horizon or adjust allocation'}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Key Metrics Row - Main Portfolio */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <div className={`${colors.card} backdrop-blur-xl rounded-lg p-4 ${colors.border}`}>
@@ -1526,32 +1978,89 @@ const PortfolioPath = () => {
               </ResponsiveContainer>
             </div>
 
-            {/* Sample Paths Chart */}
-            <div className={`${colors.card} backdrop-blur-xl rounded-lg p-4 ${colors.border}`}>
-              <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
-                <TrendingUp className="w-4 h-4 text-rose-400" />
-                Sample Simulation Paths
-              </h3>
-              <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={samplePathsData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
-                  <XAxis dataKey="day" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} />
-                  <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
-                  <Tooltip contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} />
-                  {[...Array(10)].map((_, i) => (
-                    <Line
-                      key={i}
-                      type="monotone"
-                      dataKey={`path${i}`}
-                      stroke={`hsl(${355 - i * 8}, 70%, ${55 + i * 3}%)`}
-                      strokeWidth={1}
-                      dot={false}
-                      name={`Sim ${i + 1}`}
+            {/* Drawdown Analysis Chart */}
+            {drawdownMetrics && drawdownMetrics.data && (
+              <div className={`${colors.card} backdrop-blur-xl rounded-lg p-4 ${colors.border}`}>
+                <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
+                  <TrendingDown className="w-4 h-4 text-red-400" />
+                  Drawdown Analysis
+                </h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <AreaChart data={drawdownMetrics.data}>
+                    <defs>
+                      <linearGradient id="drawdownGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#ef4444" stopOpacity={0.1}/>
+                        <stop offset="100%" stopColor="#ef4444" stopOpacity={0.4}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
+                    <XAxis dataKey="day" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} />
+                    <YAxis 
+                      stroke={isDark ? '#71717a' : '#78716c'} 
+                      tick={{ fontSize: 10 }} 
+                      tickFormatter={(v) => `-${v.toFixed(0)}%`}
+                      domain={[0, 'auto']}
+                      reversed
                     />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }}
+                      formatter={(value) => [`-${value.toFixed(2)}%`, '']}
+                    />
+                    <Area type="monotone" dataKey="worst" stroke="#dc2626" strokeWidth={1} fill="url(#drawdownGradient)" name="Worst Case" />
+                    <Area type="monotone" dataKey="p90" stroke="#ef4444" strokeWidth={1.5} fill="none" name="90th %ile" strokeDasharray="3 3" />
+                    <Area type="monotone" dataKey="median" stroke="#f87171" strokeWidth={2} fill="none" name="Median" />
+                  </AreaChart>
+                </ResponsiveContainer>
+                {/* Drawdown Stats */}
+                <div className="grid grid-cols-4 gap-2 mt-3">
+                  <div className={`p-2 rounded ${isDark ? 'bg-zinc-800/50' : 'bg-gray-100'} text-center`}>
+                    <div className={`text-xs ${colors.textMuted}`}>Median Max DD</div>
+                    <div className="text-sm font-bold text-red-400">-{drawdownMetrics.stats.median.toFixed(1)}%</div>
+                  </div>
+                  <div className={`p-2 rounded ${isDark ? 'bg-zinc-800/50' : 'bg-gray-100'} text-center`}>
+                    <div className={`text-xs ${colors.textMuted}`}>90th %ile DD</div>
+                    <div className="text-sm font-bold text-red-400">-{drawdownMetrics.stats.p90.toFixed(1)}%</div>
+                  </div>
+                  <div className={`p-2 rounded ${isDark ? 'bg-zinc-800/50' : 'bg-gray-100'} text-center`}>
+                    <div className={`text-xs ${colors.textMuted}`}>95th %ile DD</div>
+                    <div className="text-sm font-bold text-red-400">-{drawdownMetrics.stats.p95.toFixed(1)}%</div>
+                  </div>
+                  <div className="p-2 rounded bg-red-900/30 border border-red-800/50 text-center">
+                    <div className={`text-xs ${colors.textMuted}`}>Worst Case</div>
+                    <div className="text-sm font-bold text-red-400">-{drawdownMetrics.stats.worst.toFixed(1)}%</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Sample Paths Chart - Full Width */}
+          <div className={`mb-4 ${colors.card} backdrop-blur-xl rounded-lg p-4 ${colors.border}`}>
+            <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
+              <TrendingUp className="w-4 h-4 text-rose-400" />
+              Sample Simulation Paths (10 Representative Outcomes)
+            </h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={samplePathsData}>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
+                <XAxis dataKey="day" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} />
+                <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
+                <Tooltip contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} />
+                <ReferenceLine y={initialValue} stroke="#71717a" strokeDasharray="3 3" label={{ value: 'Initial', fill: '#71717a', fontSize: 10 }} />
+                {goalAmount > 0 && <ReferenceLine y={goalAmount} stroke="#10b981" strokeDasharray="5 5" label={{ value: 'Goal', fill: '#10b981', fontSize: 10 }} />}
+                {[...Array(10)].map((_, i) => (
+                  <Line
+                    key={i}
+                    type="monotone"
+                    dataKey={`path${i}`}
+                    stroke={`hsl(${355 - i * 8}, 70%, ${55 + i * 3}%)`}
+                    strokeWidth={1}
+                    dot={false}
+                    name={`Sim ${i + 1}`}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
           </div>
 
           {/* Efficient Frontier Chart */}
