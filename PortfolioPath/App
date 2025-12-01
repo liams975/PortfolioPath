@@ -1,0 +1,1052 @@
+import React, { useState, useMemo } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, Info } from 'lucide-react';
+
+// ============================================================================
+// SECTION 1: RANDOM NUMBER GENERATORS
+// ============================================================================
+// These functions generate random numbers following specific probability distributions
+// Think of them as dice with different shapes - some are fair, some are weighted
+
+// Box-Muller Transform: Converts uniform random numbers (0-1) into normal distribution
+// Normal distribution = bell curve, most values cluster around the average
+// Example: Heights of people follow a normal distribution
+const randomNormal = (mean = 0, stdDev = 1) => {
+  const u1 = Math.random(); // Random number 0-1
+  const u2 = Math.random(); // Another random number 0-1
+  // Box-Muller formula - mathematical trick to create bell curve
+  const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return z0 * stdDev + mean; // Scale and shift to desired mean/stdDev
+};
+
+// Student-t Distribution: Like normal distribution but with "fatter tails"
+// Fat tails = extreme events (crashes) happen MORE often than normal distribution predicts
+// Real markets have crashes more often than normal distribution would suggest
+// Example: 2008 crash, COVID crash - these should be "1 in 100 year events" but happen every decade
+const randomStudentT = (degreesOfFreedom = 5) => {
+  const df = degreesOfFreedom; // Lower df = fatter tails = more extreme events
+  const z = randomNormal(); // Start with normal random number
+  // Chi-squared: sum of squared normals (used to create t-distribution)
+  const chi2 = Array.from({ length: df }, () => Math.pow(randomNormal(), 2))
+    .reduce((a, b) => a + b, 0);
+  // T-distribution formula: normal / sqrt(chi-squared / df)
+  return z * Math.sqrt(df / chi2);
+};
+
+// ============================================================================
+// SECTION 2: CORRELATION MODELING (Cholesky Decomposition)
+// ============================================================================
+// In real markets, assets don't move independently. When SPY falls, tech stocks fall too.
+// This section models those relationships.
+
+// Cholesky Decomposition: Breaks correlation matrix into simpler matrix
+// Think of it like factoring: 12 = 3 × 4, we're factoring the correlation matrix
+// This lets us generate correlated random numbers from independent ones
+const choleskyDecomposition = (matrix) => {
+  const n = matrix.length; // Number of assets
+  const L = Array(n).fill(0).map(() => Array(n).fill(0)); // Lower triangular matrix
+  
+  // Fill the lower triangle using Cholesky algorithm
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      let sum = 0;
+      for (let k = 0; k < j; k++) {
+        sum += L[i][k] * L[j][k];
+      }
+      
+      if (i === j) {
+        // Diagonal elements: sqrt of remaining variance
+        L[i][j] = Math.sqrt(Math.max(matrix[i][i] - sum, 0.0001));
+      } else {
+        // Off-diagonal: correlation divided by diagonal
+        L[i][j] = (matrix[i][j] - sum) / L[j][j];
+      }
+    }
+  }
+  return L;
+};
+
+// Generate Correlated Returns: Takes independent random numbers and correlates them
+// Input: Independent random numbers (uncorrelated)
+// Output: Correlated random numbers (move together like real assets)
+const generateCorrelatedReturns = (choleskyMatrix, useFatTails = false, df = 5) => {
+  const n = choleskyMatrix.length;
+  // Generate independent random numbers (either normal or t-distribution)
+  const uncorrelated = useFatTails 
+    ? Array.from({ length: n }, () => randomStudentT(df))
+    : Array.from({ length: n }, () => randomNormal());
+  
+  // Matrix multiplication: Cholesky × uncorrelated = correlated
+  const correlated = Array(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      correlated[i] += choleskyMatrix[i][j] * uncorrelated[j];
+    }
+  }
+  return correlated;
+};
+
+// ============================================================================
+// SECTION 3: GARCH VOLATILITY MODEL
+// ============================================================================
+// GARCH = Generalized Autoregressive Conditional Heteroskedasticity (fancy name!)
+// Simple idea: Volatility changes over time and clusters
+// - After a big move (up or down), more big moves tend to follow
+// - After calm periods, more calm follows
+// Example: 2008 had high volatility for MONTHS, not just one day
+
+class GARCHModel {
+  constructor(omega = 0.000001, alpha = 0.1, beta = 0.85) {
+    // omega = baseline variance (long-term average)
+    // alpha = how much recent shocks affect volatility (0.1 = 10% weight on yesterday's shock)
+    // beta = how much yesterday's volatility persists (0.85 = high persistence)
+    this.omega = omega;
+    this.alpha = alpha;
+    this.beta = beta;
+    this.currentVariance = 0.0001; // Starting variance
+  }
+  
+  // Update volatility based on latest return shock
+  update(returnShock) {
+    // GARCH(1,1) formula:
+    // Today's variance = omega + alpha × (yesterday's shock)² + beta × (yesterday's variance)
+    this.currentVariance = this.omega + 
+      this.alpha * Math.pow(returnShock, 2) + 
+      this.beta * this.currentVariance;
+    return Math.sqrt(this.currentVariance); // Return volatility (std dev)
+  }
+  
+  getVolatility() {
+    return Math.sqrt(this.currentVariance);
+  }
+}
+
+// ============================================================================
+// SECTION 4: REGIME SWITCHING MODEL
+// ============================================================================
+// Markets alternate between "Bull" (good times) and "Bear" (bad times)
+// This is a 2-state Markov Chain - market is always in one of two states
+// Transition probabilities determine how often markets switch
+
+class RegimeSwitchingModel {
+  constructor() {
+    // Define Bull and Bear market characteristics
+    this.regimes = {
+      bull: { 
+        mean: 0.0006,  // +0.06% per day = +15% per year
+        vol: 0.01,     // 1% daily volatility = 16% annual volatility
+        label: 'Bull Market' 
+      },
+      bear: { 
+        mean: -0.0003, // -0.03% per day = -7.5% per year
+        vol: 0.025,    // 2.5% daily volatility = 40% annual volatility (scary!)
+        label: 'Bear Market' 
+      }
+    };
+    
+    // Transition probabilities (Markov Chain)
+    this.transitionMatrix = {
+      bull: { 
+        bull: 0.95, // 95% chance bull market continues tomorrow
+        bear: 0.05  // 5% chance it switches to bear
+      },
+      bear: { 
+        bull: 0.10, // 10% chance bear market recovers tomorrow
+        bear: 0.90  // 90% chance bear continues (bear markets are sticky!)
+      }
+    };
+    
+    this.currentRegime = 'bull'; // Start in bull market
+  }
+  
+  // Randomly transition to next regime based on probabilities
+  transition() {
+    const rand = Math.random(); // Random number 0-1
+    const probs = this.transitionMatrix[this.currentRegime];
+    
+    // If random number < bear probability, switch to bear
+    if (rand < probs.bear) {
+      this.currentRegime = 'bear';
+    } else {
+      this.currentRegime = 'bull';
+    }
+    
+    return this.currentRegime;
+  }
+  
+  getParameters() {
+    return this.regimes[this.currentRegime];
+  }
+  
+  getCurrentRegime() {
+    return this.currentRegime;
+  }
+}
+
+// ============================================================================
+// SECTION 5: ASSET DATABASE
+// ============================================================================
+// These are STYLIZED parameters based on historical market behavior
+// NOT real historical data from a specific timeframe
+// Think of these as "typical" or "average" behavior for each asset class
+//
+// DATA MODELING EXPLANATION:
+// - mean: Average DAILY return (e.g., 0.0003 = 0.03% per day ≈ 7.5% per year)
+// - vol: DAILY volatility/standard deviation (e.g., 0.01 = 1% per day ≈ 16% per year)
+// - These are calibrated to match "typical" market conditions from 2010-2020
+// - NOT from a specific date range, but representative of modern markets
+//
+// Real-world comparison:
+// - S&P 500 historically: ~10% annual return, ~15-18% annual volatility
+// - Bonds: ~3-5% annual return, ~4-6% annual volatility
+// - Tech stocks: Higher return but much higher volatility
+
+const assetDatabase = {
+  'SPY': { mean: 0.0003, vol: 0.01, name: 'S&P 500 ETF' },        // Large cap US stocks
+  'QQQ': { mean: 0.0004, vol: 0.015, name: 'Nasdaq 100 ETF' },   // Tech-heavy
+  'AAPL': { mean: 0.0005, vol: 0.018, name: 'Apple Inc.' },      // Individual tech stock
+  'MSFT': { mean: 0.0004, vol: 0.016, name: 'Microsoft Corp.' },
+  'GOOGL': { mean: 0.0004, vol: 0.017, name: 'Alphabet Inc.' },
+  'TSLA': { mean: 0.0006, vol: 0.035, name: 'Tesla Inc.' },      // Very volatile!
+  'VTI': { mean: 0.0003, vol: 0.01, name: 'Total Stock Market' },
+  'BND': { mean: 0.0001, vol: 0.004, name: 'Bond Index ETF' },   // Low return, low risk
+  'GLD': { mean: 0.0002, vol: 0.012, name: 'Gold ETF' },         // Inflation hedge
+  'IWM': { mean: 0.0003, vol: 0.016, name: 'Small Cap ETF' },    // Small companies
+};
+
+// ============================================================================
+// SECTION 6: CORRELATION MATRIX GENERATION
+// ============================================================================
+// HOW CORRELATIONS ARE MODELED:
+// Correlations are SIMPLIFIED but realistic relationships between assets:
+// - Equities correlate highly with each other (when market drops, most stocks drop)
+// - Bonds negatively correlate with stocks (flight to safety during crashes)
+// - Gold has low correlation (moves independently)
+//
+// In a real app, you would calculate these from historical price data
+// For now, we use realistic "stylized" correlations based on market behavior
+
+const generateCorrelationMatrix = (tickers) => {
+  const n = tickers.length;
+  const matrix = Array(n).fill(0).map(() => Array(n).fill(0));
+  
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (i === j) {
+        matrix[i][j] = 1; // Perfect correlation with itself
+      } else {
+        const t1 = tickers[i];
+        const t2 = tickers[j];
+        
+        // Market index ETFs correlate highly (SPY, QQQ, VTI move together)
+        if (['SPY', 'QQQ', 'VTI', 'IWM'].includes(t1) && 
+            ['SPY', 'QQQ', 'VTI', 'IWM'].includes(t2)) {
+          matrix[i][j] = 0.85; // 85% correlation - very high
+        }
+        // Tech stocks correlate highly with each other
+        else if (['AAPL', 'MSFT', 'GOOGL', 'QQQ'].includes(t1) && 
+                 ['AAPL', 'MSFT', 'GOOGL', 'QQQ'].includes(t2)) {
+          matrix[i][j] = 0.75; // 75% correlation
+        }
+        // Bonds NEGATIVELY correlate with stocks (when stocks fall, bonds rise)
+        else if ((t1 === 'BND' && t2 !== 'GLD') || (t2 === 'BND' && t1 !== 'GLD')) {
+          matrix[i][j] = -0.3; // Negative correlation = diversification benefit!
+        }
+        // Gold has low correlation (good diversifier)
+        else if (t1 === 'GLD' || t2 === 'GLD') {
+          matrix[i][j] = 0.1; // Almost independent
+        }
+        // TSLA is volatile and less correlated with market
+        else if (t1 === 'TSLA' || t2 === 'TSLA') {
+          matrix[i][j] = 0.5; // Moderate correlation
+        }
+        else {
+          matrix[i][j] = 0.6; // Default moderate correlation for stocks
+        }
+      }
+    }
+  }
+  return matrix;
+};
+
+// ============================================================================
+// SECTION 7: MONTE CARLO SIMULATION ENGINE
+// ============================================================================
+// This is the CORE of the app - runs thousands of possible futures
+//
+// HOW IT WORKS:
+// 1. Start with your initial investment (e.g., $10,000)
+// 2. For each simulation (e.g., 1000 times):
+//    a. Randomly generate market returns for each day
+//    b. Apply correlations so assets move together realistically
+//    c. Update GARCH volatility based on recent moves
+//    d. Switch between bull/bear regimes randomly
+//    e. Compound your portfolio value day by day
+// 3. After all simulations, you have 1000 possible future outcomes
+//
+// SCENARIO MODELING:
+// Scenarios adjust the simulation parameters:
+// - Recession: Reduces all returns by 30% (simulates economic downturn)
+// - Volatility Spike: Increases randomness by 50% (simulates panic/crashes)
+// - Bull Market: Increases all returns by 30% (simulates boom times)
+//
+// These are MULTIPLICATIVE adjustments applied to the base returns
+
+const runAdvancedMonteCarloSimulation = (
+  portfolio, 
+  initialValue, 
+  days, 
+  simulations, 
+  options = {}
+) => {
+  const {
+    useCorrelation = true,      // Model how assets move together
+    useFatTails = true,          // Use Student-t for realistic crashes
+    useGARCH = true,             // Model volatility clustering
+    useRegimeSwitching = true,   // Model bull/bear market cycles
+    scenarios = {}               // User-selected scenario adjustments
+  } = options;
+  
+  const results = [];
+  const tickers = portfolio.map(p => p.ticker);
+  const weights = portfolio.map(p => p.weight);
+  
+  // Pre-compute correlation structure (only once, not every simulation)
+  const correlationMatrix = useCorrelation ? generateCorrelationMatrix(tickers) : null;
+  const choleskyMatrix = correlationMatrix ? choleskyDecomposition(correlationMatrix) : null;
+  
+  // Run multiple simulations (each is one possible future)
+  for (let sim = 0; sim < simulations; sim++) {
+    let value = initialValue; // Start with initial investment
+    const path = [{ day: 0, value, regime: 'bull' }]; // Track portfolio value each day
+    
+    // Initialize GARCH models (one per asset, tracks volatility over time)
+    const garchModels = useGARCH 
+      ? portfolio.map(() => new GARCHModel())
+      : null;
+    
+    // Initialize regime switching model (tracks bull/bear state)
+    const regimeModel = useRegimeSwitching ? new RegimeSwitchingModel() : null;
+    
+    // Simulate day by day for the time horizon
+    for (let day = 1; day <= days; day++) {
+      let dailyReturn = 0; // Total portfolio return for this day
+      
+      // Get current regime parameters (bull or bear)
+      const regimeParams = regimeModel ? regimeModel.getParameters() : null;
+      const currentRegime = regimeModel ? regimeModel.getCurrentRegime() : 'bull';
+      
+      // Generate random returns (correlated if enabled)
+      let returns;
+      if (useCorrelation && choleskyMatrix) {
+        // Generate correlated returns using Cholesky decomposition
+        returns = generateCorrelatedReturns(choleskyMatrix, useFatTails, 5);
+      } else {
+        // Generate independent returns (no correlation)
+        returns = portfolio.map(() => useFatTails ? randomStudentT(5) : randomNormal());
+      }
+      
+      // Calculate return for each asset and weight it
+      portfolio.forEach(({ ticker, weight }, idx) => {
+        const assetParams = assetDatabase[ticker] || { mean: 0.0003, vol: 0.012 };
+        
+        // Start with base parameters
+        let mean = assetParams.mean;
+        let vol = assetParams.vol;
+        
+        // Adjust for current regime (bull or bear)
+        if (regimeParams) {
+          mean = mean * (regimeParams.mean / 0.0003); // Scale by regime
+          vol = vol * (regimeParams.vol / 0.01);
+        }
+        
+        // Apply GARCH volatility (time-varying)
+        if (useGARCH && garchModels) {
+          const baseReturn = returns[idx] * vol + mean;
+          vol = garchModels[idx].update(baseReturn); // Update volatility
+        }
+        
+        // Calculate asset return: random shock × volatility + mean
+        let assetReturn = returns[idx] * vol + mean;
+        
+        // Apply user-selected scenario adjustments
+        if (scenarios.recession) assetReturn *= 0.7;           // 30% reduction
+        if (scenarios.volatilitySpike) assetReturn *= (1 + randomNormal(0, 0.5)); // 50% more volatile
+        if (scenarios.bullMarket) assetReturn *= 1.3;          // 30% boost
+        
+        // Weight the return by portfolio allocation
+        dailyReturn += assetReturn * weight;
+      });
+      
+      // Compound portfolio value: multiply by (1 + return)
+      value *= (1 + dailyReturn);
+      
+      // Transition to next regime for tomorrow
+      if (regimeModel) regimeModel.transition();
+      
+      // Record this day's value
+      path.push({ day, value, regime: currentRegime });
+    }
+    
+    // Store this simulation's complete path
+    results.push(path);
+  }
+  
+  return results; // Array of 1000 paths, each with 252 days
+};
+
+// ============================================================================
+// SECTION 8: RISK METRICS CALCULATION
+// ============================================================================
+// After running simulations, calculate statistics to understand risk
+
+const calculateRiskMetrics = (simulations, initialValue) => {
+  if (!simulations || simulations.length === 0) return null;
+  
+  // Extract final value from each simulation
+  const finalValues = simulations.map(path => {
+    const lastPoint = path[path.length - 1];
+    return lastPoint ? lastPoint.value : initialValue;
+  }).filter(v => v !== undefined && v !== null);
+  
+  if (finalValues.length === 0) return null;
+  
+  finalValues.sort((a, b) => a - b); // Sort from worst to best
+  
+  // Calculate returns (percent change from initial)
+  const returns = finalValues.map(v => (v - initialValue) / initialValue);
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a, r) => a + Math.pow(r - mean, 2), 0) / returns.length;
+  const stdDev = Math.sqrt(variance);
+  
+  // Kurtosis: Measures "fat-tailedness" (how often extreme events occur)
+  // Kurtosis = 3 for normal distribution
+  // Kurtosis > 3 = fat tails (more crashes than normal would predict)
+  const kurtosis = returns.reduce((a, r) => a + Math.pow(r - mean, 4), 0) / 
+    (returns.length * Math.pow(stdDev, 4));
+  
+  // VaR (Value at Risk): "What's my worst case loss at X% confidence?"
+  // VaR 95% = 5th percentile (95% of outcomes are better than this)
+  const var95 = finalValues[Math.floor(finalValues.length * 0.05)] || initialValue;
+  const var99 = finalValues[Math.floor(finalValues.length * 0.01)] || initialValue;
+  
+  // Expected Shortfall (CVaR): "If I'm in the worst 5%, how bad is it ON AVERAGE?"
+  // More useful than VaR because it measures TAIL RISK
+  const tailLosses = finalValues.filter(v => v <= var95);
+  const expectedShortfall = tailLosses.length > 0 
+    ? tailLosses.reduce((a, b) => a + b, 0) / tailLosses.length 
+    : var95;
+  
+  return {
+    mean: mean * 100,                    // Expected return (%)
+    volatility: stdDev * 100,            // Risk (standard deviation %)
+    kurtosis: kurtosis,                  // Fat-tailedness
+    var95: ((var95 - initialValue) / initialValue) * 100,        // 5% worst case
+    var99: ((var99 - initialValue) / initialValue) * 100,        // 1% worst case
+    expectedShortfall: ((expectedShortfall - initialValue) / initialValue) * 100,
+    sharpeRatio: stdDev > 0 ? mean / stdDev : 0,  // Return per unit of risk
+    percentiles: {
+      p10: finalValues[Math.floor(finalValues.length * 0.1)] || initialValue,
+      p25: finalValues[Math.floor(finalValues.length * 0.25)] || initialValue,
+      p50: finalValues[Math.floor(finalValues.length * 0.5)] || initialValue,  // Median
+      p75: finalValues[Math.floor(finalValues.length * 0.75)] || initialValue,
+      p90: finalValues[Math.floor(finalValues.length * 0.9)] || initialValue,
+    }
+  };
+};
+
+// ============================================================================
+// SECTION 9: REACT UI COMPONENT
+// ============================================================================
+
+const PortfolioPath = () => {
+  const [view, setView] = useState('input');
+  const [portfolio, setPortfolio] = useState([
+    { ticker: 'SPY', weight: 0.6 },
+    { ticker: 'BND', weight: 0.4 }
+  ]);
+  const [initialValue, setInitialValue] = useState(10000);
+  const [timeHorizon, setTimeHorizon] = useState(252);
+  const [numSimulations, setNumSimulations] = useState(1000);
+  const [scenarios, setScenarios] = useState({});
+  const [advancedOptions, setAdvancedOptions] = useState({
+    useCorrelation: true,
+    useFatTails: true,
+    useGARCH: true,
+    useRegimeSwitching: true
+  });
+  const [simulationResults, setSimulationResults] = useState(null);
+  const [showInfo, setShowInfo] = useState(false);
+
+  const addPosition = () => {
+    setPortfolio([...portfolio, { ticker: '', weight: 0 }]);
+  };
+
+  const updatePosition = (idx, field, value) => {
+    const updated = [...portfolio];
+    if (field === 'weight') {
+      updated[idx][field] = parseFloat(value) || 0;
+    } else {
+      updated[idx][field] = value.toUpperCase();
+    }
+    setPortfolio(updated);
+  };
+
+  const removePosition = (idx) => {
+    setPortfolio(portfolio.filter((_, i) => i !== idx));
+  };
+
+  const totalWeight = portfolio.reduce((sum, p) => sum + p.weight, 0);
+
+  const runSimulation = () => {
+    if (Math.abs(totalWeight - 1) > 0.01) {
+      alert('Portfolio weights must sum to 100%');
+      return;
+    }
+    
+    const results = runAdvancedMonteCarloSimulation(
+      portfolio,
+      initialValue,
+      timeHorizon,
+      numSimulations,
+      {
+        ...advancedOptions,
+        scenarios
+      }
+    );
+    
+    setSimulationResults(results);
+    setView('results');
+  };
+
+  const riskMetrics = useMemo(() => {
+    if (!simulationResults) return null;
+    return calculateRiskMetrics(simulationResults, initialValue);
+  }, [simulationResults, initialValue]);
+
+  const fanChartData = useMemo(() => {
+    if (!simulationResults || simulationResults.length === 0) return [];
+    
+    const data = [];
+    const step = Math.max(1, Math.ceil(timeHorizon / 50));
+    
+    for (let day = 0; day <= timeHorizon; day += step) {
+      const values = simulationResults
+        .map(path => path[day] ? path[day].value : null)
+        .filter(v => v !== null && v !== undefined)
+        .sort((a, b) => a - b);
+      
+      if (values.length > 0) {
+        data.push({
+          day,
+          p10: values[Math.floor(values.length * 0.1)] || values[0],
+          p25: values[Math.floor(values.length * 0.25)] || values[0],
+          p50: values[Math.floor(values.length * 0.5)] || values[0],
+          p75: values[Math.floor(values.length * 0.75)] || values[0],
+          p90: values[Math.floor(values.length * 0.9)] || values[0],
+        });
+      }
+    }
+    return data;
+  }, [simulationResults, timeHorizon]);
+
+  const distributionData = useMemo(() => {
+    if (!simulationResults || simulationResults.length === 0 || !riskMetrics) return [];
+    
+    const finalValues = simulationResults
+      .map(path => {
+        const lastPoint = path[path.length - 1];
+        return lastPoint ? lastPoint.value : null;
+      })
+      .filter(v => v !== null && v !== undefined);
+    
+    if (finalValues.length === 0) return [];
+    
+    const min = Math.min(...finalValues);
+    const max = Math.max(...finalValues);
+    const bins = 40;
+    const binSize = (max - min) / bins;
+    
+    if (binSize === 0) return [];
+    
+    const histogram = Array(bins).fill(0);
+    finalValues.forEach(v => {
+      const bin = Math.min(Math.floor((v - min) / binSize), bins - 1);
+      histogram[bin]++;
+    });
+    
+    return histogram.map((count, i) => ({
+      value: min + i * binSize + binSize / 2,
+      frequency: count
+    }));
+  }, [simulationResults, riskMetrics]);
+
+  const correlationData = useMemo(() => {
+    if (!portfolio.length) return null;
+    const tickers = portfolio.map(p => p.ticker).filter(t => t);
+    if (tickers.length < 2) return null;
+    return generateCorrelationMatrix(tickers);
+  }, [portfolio]);
+
+  // ============================================================================
+  // INPUT VIEW
+  // ============================================================================
+  
+  if (view === 'input') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-red-950 to-gray-950 text-white p-8">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
+            <h1 className="text-6xl font-bold mb-4 text-white tracking-tight">
+              PortfolioPath
+            </h1>
+            <p className="text-xl text-gray-300 font-light">Quantitative Portfolio Analytics</p>
+            <div className="flex items-center justify-center gap-4 mt-4 text-sm text-gray-400">
+              <span>Monte Carlo Simulation</span>
+              <span>•</span>
+              <span>GARCH Volatility</span>
+              <span>•</span>
+              <span>Regime Switching</span>
+            </div>
+            
+            <button
+              onClick={() => setShowInfo(!showInfo)}
+              className="mt-6 px-6 py-2 bg-red-900/30 hover:bg-red-900/50 border border-red-800 rounded-lg transition-colors flex items-center gap-2 mx-auto"
+            >
+              <Info className="w-4 h-4" />
+              {showInfo ? 'Hide' : 'Show'} Data Modeling Info
+            </button>
+            
+            {showInfo && (
+              <div className="mt-6 p-6 bg-gray-900/50 border border-gray-800 rounded-xl text-left text-sm text-gray-300 max-w-3xl mx-auto">
+                <h3 className="text-lg font-semibold mb-3 text-red-400">How is the data modeled?</h3>
+                <ul className="space-y-2 list-disc list-inside">
+                  <li><strong>Time Horizon:</strong> Simulates trading days into the future (252 days = 1 year). NOT based on a specific historical timeframe.</li>
+                  <li><strong>Asset Parameters:</strong> Stylized values based on typical 2010-2020 market behavior (e.g., SPY: ~7.5% annual return, 16% volatility).</li>
+                  <li><strong>Correlations:</strong> Simplified relationships (e.g., stocks correlate 0.85, stocks/bonds -0.3) to model realistic diversification.</li>
+                  <li><strong>Scenarios:</strong> Recession reduces returns by 30%, Volatility Spike increases randomness by 50%, Bull Market boosts returns by 30%.</li>
+                  <li><strong>Models:</strong> Fat-tailed distributions capture crashes, GARCH models volatility clustering, Regime Switching models bull/bear cycles.</li>
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800 mb-6">
+            <h2 className="text-2xl font-semibold mb-6 flex items-center gap-3 text-gray-100">
+              <Target className="w-6 h-6 text-red-500" />
+              Portfolio Configuration
+            </h2>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium mb-2 text-gray-300">Initial Investment ($)</label>
+              <input
+                type="number"
+                value={initialValue}
+                onChange={(e) => setInitialValue(parseFloat(e.target.value) || 0)}
+                className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-red-600 focus:border-red-600 focus:outline-none"
+              />
+            </div>
+
+            <div className="mb-8">
+              <label className="block text-sm font-medium mb-3 text-gray-300">Asset Allocation</label>
+              {portfolio.map((pos, idx) => (
+                <div key={idx} className="flex gap-3 mb-3">
+                  <input
+                    type="text"
+                    placeholder="Ticker"
+                    value={pos.ticker}
+                    onChange={(e) => updatePosition(idx, 'ticker', e.target.value)}
+                    className="w-1/3 bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-red-600 focus:border-red-600 focus:outline-none"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Weight (0-1)"
+                    value={pos.weight}
+                    onChange={(e) => updatePosition(idx, 'weight', e.target.value)}
+                    step="0.01"
+                    className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-red-600 focus:border-red-600 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => removePosition(idx)}
+                    className="px-4 py-3 bg-red-900/50 hover:bg-red-900/70 border border-red-800 rounded-lg transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={addPosition}
+                className="w-full py-3 bg-gray-800/50 hover:bg-gray-800/70 border border-gray-700 rounded-lg transition-colors"
+              >
+                + Add Asset
+              </button>
+              <p className={`mt-2 text-sm ${Math.abs(totalWeight - 1) < 0.01 ? 'text-green-400' : 'text-red-400'}`}>
+                Total Weight: {(totalWeight * 100).toFixed(1)}% {Math.abs(totalWeight - 1) < 0.01 ? '✓' : '(must equal 100%)'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-300">Time Horizon (Days)</label>
+                <input
+                  type="number"
+                  value={timeHorizon}
+                  onChange={(e) => setTimeHorizon(parseInt(e.target.value) || 252)}
+                  className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-red-600 focus:border-red-600 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-300">Simulations</label>
+                <input
+                  type="number"
+                  value={numSimulations}
+                  onChange={(e) => setNumSimulations(parseInt(e.target.value) || 1000)}
+                  className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-red-600 focus:border-red-600 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800 mb-6">
+            <h2 className="text-2xl font-semibold mb-6 flex items-center gap-3 text-gray-100">
+              <Zap className="w-6 h-6 text-red-500" />
+              Advanced Modeling Features
+            </h2>
+
+            <div className="space-y-4">
+              <label className="flex items-center gap-4 p-4 bg-gray-950/50 border border-gray-800 rounded-lg cursor-pointer hover:bg-gray-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={advancedOptions.useCorrelation}
+                  onChange={(e) => setAdvancedOptions({...advancedOptions, useCorrelation: e.target.checked})}
+                  className="w-5 h-5 accent-red-600"
+                />
+                <div>
+                  <div className="font-medium text-base flex items-center gap-2">
+                    <Network className="w-5 h-5 text-red-400" />
+                    Asset Correlation Matrix
+                  </div>
+                  <div className="text-sm text-gray-400">Cholesky decomposition for inter-asset dependencies</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-4 p-4 bg-gray-950/50 border border-gray-800 rounded-lg cursor-pointer hover:bg-gray-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={advancedOptions.useFatTails}
+                  onChange={(e) => setAdvancedOptions({...advancedOptions, useFatTails: e.target.checked})}
+                  className="w-5 h-5 accent-red-600"
+                />
+                <div>
+                  <div className="font-medium text-base">Fat-Tailed Distributions</div>
+                  <div className="text-sm text-gray-400">Student-t distribution for realistic tail risk</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-4 p-4 bg-gray-950/50 border border-gray-800 rounded-lg cursor-pointer hover:bg-gray-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={advancedOptions.useGARCH}
+                  onChange={(e) => setAdvancedOptions({...advancedOptions, useGARCH: e.target.checked})}
+                  className="w-5 h-5 accent-red-600"
+                />
+                <div>
+                  <div className="font-medium text-base">GARCH(1,1) Volatility</div>
+                  <div className="text-sm text-gray-400">Time-varying volatility clustering</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-4 p-4 bg-gray-950/50 border border-gray-800 rounded-lg cursor-pointer hover:bg-gray-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={advancedOptions.useRegimeSwitching}
+                  onChange={(e) => setAdvancedOptions({...advancedOptions, useRegimeSwitching: e.target.checked})}
+                  className="w-5 h-5 accent-red-600"
+                />
+                <div>
+                  <div className="font-medium text-base">Regime Switching</div>
+                  <div className="text-sm text-gray-400">2-state Markov model for market cycles</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              onClick={() => setView('scenarios')}
+              className="py-4 bg-gray-800/50 hover:bg-gray-800/70 border border-gray-700 rounded-lg transition-all font-medium text-lg"
+            >
+              Configure Scenarios
+            </button>
+
+            <button
+              onClick={runSimulation}
+              className="py-4 bg-red-800 hover:bg-red-700 rounded-lg transition-all font-medium text-lg shadow-lg"
+            >
+              Run Simulation
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // SCENARIOS VIEW
+  // ============================================================================
+  
+  if (view === 'scenarios') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-red-950 to-gray-950 text-white p-8">
+        <div className="max-w-4xl mx-auto">
+          <button
+            onClick={() => setView('input')}
+            className="mb-6 px-6 py-2 bg-gray-800/50 hover:bg-gray-800/70 border border-gray-700 rounded-lg transition-colors"
+          >
+            ← Back to Portfolio
+          </button>
+
+          <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800">
+            <h2 className="text-2xl font-semibold mb-6 flex items-center gap-3 text-gray-100">
+              <Settings className="w-6 h-6 text-red-500" />
+              Scenario Testing
+            </h2>
+
+            <p className="text-gray-300 mb-8">
+              Test your portfolio against different market conditions. These scenarios multiply your base returns by adjustment factors.
+            </p>
+
+            <div className="space-y-6">
+              <label className="flex items-center gap-4 p-4 bg-gray-950/50 border border-gray-800 rounded-lg cursor-pointer hover:bg-gray-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={scenarios.recession || false}
+                  onChange={(e) => setScenarios({ ...scenarios, recession: e.target.checked })}
+                  className="w-5 h-5 accent-red-600"
+                />
+                <div>
+                  <div className="font-medium text-base">Recession Scenario</div>
+                  <div className="text-sm text-gray-400">Reduces expected returns by 30% (×0.7 multiplier)</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-4 p-4 bg-gray-950/50 border border-gray-800 rounded-lg cursor-pointer hover:bg-gray-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={scenarios.volatilitySpike || false}
+                  onChange={(e) => setScenarios({ ...scenarios, volatilitySpike: e.target.checked })}
+                  className="w-5 h-5 accent-red-600"
+                />
+                <div>
+                  <div className="font-medium text-base">Volatility Spike</div>
+                  <div className="text-sm text-gray-400">Increases market volatility by 50% (random shock multiplier)</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-4 p-4 bg-gray-950/50 border border-gray-800 rounded-lg cursor-pointer hover:bg-gray-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={scenarios.bullMarket || false}
+                  onChange={(e) => setScenarios({ ...scenarios, bullMarket: e.target.checked })}
+                  className="w-5 h-5 accent-red-600"
+                />
+                <div>
+                  <div className="font-medium text-base">Bull Market</div>
+                  <div className="text-sm text-gray-400">Increases expected returns by 30% (×1.3 multiplier)</div>
+                </div>
+              </label>
+            </div>
+
+            <button
+              onClick={() => setView('input')}
+              className="w-full mt-8 py-4 bg-red-800 hover:bg-red-700 rounded-lg transition-all font-medium text-lg shadow-lg"
+            >
+              Apply Scenarios
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // RESULTS VIEW
+  // ============================================================================
+  
+  if (view === 'results' && simulationResults && riskMetrics) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-red-950 to-gray-950 text-white p-8">
+        <div className="max-w-7xl mx-auto">
+          <button
+            onClick={() => setView('input')}
+            className="mb-6 px-6 py-2 bg-gray-800/50 hover:bg-gray-800/70 border border-gray-700 rounded-lg transition-colors"
+          >
+            ← New Simulation
+          </button>
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+            <div className="bg-gradient-to-br from-red-900 to-red-950 rounded-xl p-6 shadow-xl border border-red-800">
+              <div className="flex items-center gap-3 mb-3">
+                <TrendingUp className="w-5 h-5" />
+                <h3 className="text-sm font-medium uppercase tracking-wide">Expected Return</h3>
+              </div>
+              <p className="text-4xl font-bold">{riskMetrics.mean.toFixed(2)}%</p>
+              <p className="text-sm text-gray-300 mt-2">Mean portfolio return</p>
+            </div>
+
+            <div className="bg-gradient-to-br from-orange-900 to-orange-950 rounded-xl p-6 shadow-xl border border-orange-800">
+              <div className="flex items-center gap-3 mb-3">
+                <Activity className="w-5 h-5" />
+                <h3 className="text-sm font-medium uppercase tracking-wide">Volatility</h3>
+              </div>
+              <p className="text-4xl font-bold">{riskMetrics.volatility.toFixed(2)}%</p>
+              <p className="text-sm text-gray-300 mt-2">Standard deviation</p>
+            </div>
+
+            <div className="bg-gradient-to-br from-red-900 to-red-950 rounded-xl p-6 shadow-xl border border-red-800">
+              <div className="flex items-center gap-3 mb-3">
+                <AlertTriangle className="w-5 h-5" />
+                <h3 className="text-sm font-medium uppercase tracking-wide">VaR (95%)</h3>
+              </div>
+              <p className="text-4xl font-bold">{riskMetrics.var95.toFixed(2)}%</p>
+              <p className="text-sm text-gray-300 mt-2">5% worst case</p>
+            </div>
+
+            <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl p-6 shadow-xl border border-gray-700">
+              <div className="flex items-center gap-3 mb-3">
+                <BarChart3 className="w-5 h-5" />
+                <h3 className="text-sm font-medium uppercase tracking-wide">Kurtosis</h3>
+              </div>
+              <p className="text-4xl font-bold">{riskMetrics.kurtosis.toFixed(2)}</p>
+              <p className="text-sm text-gray-300 mt-2">Tail risk (3=normal)</p>
+            </div>
+          </div>
+
+          <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800 mb-8">
+            <h3 className="text-xl font-semibold mb-6 flex items-center gap-3 text-gray-100">
+              <BarChart3 className="w-6 h-6 text-red-500" />
+              Portfolio Value Projections (Fan Chart)
+            </h3>
+            <ResponsiveContainer width="100%" height={400}>
+              <AreaChart data={fanChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="day" stroke="#9ca3af" label={{ value: 'Trading Days', position: 'insideBottom', offset: -5, fill: '#9ca3af' }} />
+                <YAxis stroke="#9ca3af" label={{ value: 'Portfolio Value ($)', angle: -90, position: 'insideLeft', fill: '#9ca3af' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }} />
+                <Area type="monotone" dataKey="p90" stackId="1" stroke="#dc2626" fill="#dc2626" fillOpacity={0.1} name="90th Percentile" />
+                <Area type="monotone" dataKey="p75" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.15} name="75th Percentile" />
+                <Area type="monotone" dataKey="p50" stackId="1" stroke="#f87171" fill="#f87171" fillOpacity={0.3} name="Median" />
+                <Area type="monotone" dataKey="p25" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.15} name="25th Percentile" />
+                <Area type="monotone" dataKey="p10" stackId="1" stroke="#dc2626" fill="#dc2626" fillOpacity={0.1} name="10th Percentile" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800">
+              <h3 className="text-lg font-semibold mb-6 text-gray-100">Final Value Distribution</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={distributionData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="value" stroke="#9ca3af" tickFormatter={(v) => `${(v/1000).toFixed(0)}k`} />
+                  <YAxis stroke="#9ca3af" />
+                  <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }} />
+                  <Area type="monotone" dataKey="frequency" stroke="#dc2626" fill="#dc2626" fillOpacity={0.6} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800">
+              <h3 className="text-lg font-semibold mb-6 text-gray-100">Risk Metrics</h3>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center p-3 bg-gray-950/50 border border-gray-800 rounded-lg">
+                  <span className="text-gray-300">Sharpe Ratio</span>
+                  <span className="font-bold text-lg">{riskMetrics.sharpeRatio.toFixed(3)}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-gray-950/50 border border-gray-800 rounded-lg">
+                  <span className="text-gray-300">VaR (99%)</span>
+                  <span className="font-bold text-lg text-red-400">{riskMetrics.var99.toFixed(2)}%</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-gray-950/50 border border-gray-800 rounded-lg">
+                  <span className="text-gray-300">Expected Shortfall</span>
+                  <span className="font-bold text-lg text-red-400">{riskMetrics.expectedShortfall.toFixed(2)}%</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-gray-950/50 border border-gray-800 rounded-lg">
+                  <span className="text-gray-300">Median Outcome</span>
+                  <span className="font-bold text-lg text-green-400">${riskMetrics.percentiles.p50.toFixed(0)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {correlationData && advancedOptions.useCorrelation && (
+            <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800 mb-8">
+              <h3 className="text-lg font-semibold mb-6 flex items-center gap-3 text-gray-100">
+                <Network className="w-5 h-5 text-red-500" />
+                Asset Correlation Matrix
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="p-2 text-left text-gray-300">Asset</th>
+                      {portfolio.map((p, i) => (
+                        <th key={i} className="p-2 text-center text-gray-300">{p.ticker}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {portfolio.map((p, i) => (
+                      <tr key={i} className="border-b border-gray-800">
+                        <td className="p-2 font-medium text-gray-300">{p.ticker}</td>
+                        {correlationData[i].map((corr, j) => (
+                          <td 
+                            key={j} 
+                            className="p-2 text-center font-mono"
+                            style={{
+                              backgroundColor: `rgba(${corr > 0 ? '220, 38, 38' : '59, 130, 246'}, ${Math.abs(corr) * 0.4})`
+                            }}
+                          >
+                            {corr.toFixed(2)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-sm text-gray-400 mt-4">
+                Red = Positive correlation • Blue = Negative correlation • Intensity = Strength
+              </p>
+            </div>
+          )}
+
+          <div className="bg-gray-900/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl border border-gray-800">
+            <h3 className="text-lg font-semibold mb-6 text-gray-100">Outcome Scenarios</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="p-6 bg-red-950/30 border border-red-900 rounded-xl">
+                <h4 className="font-medium text-sm mb-2 text-red-300 uppercase tracking-wide">Worst Case (10th %ile)</h4>
+                <p className="text-3xl font-bold">${riskMetrics.percentiles.p10.toFixed(0)}</p>
+                <p className="text-sm text-gray-300 mt-2">{((riskMetrics.percentiles.p10 - initialValue) / initialValue * 100).toFixed(1)}% return</p>
+              </div>
+              <div className="p-6 bg-gray-800/30 border border-gray-700 rounded-xl">
+                <h4 className="font-medium text-sm mb-2 text-gray-300 uppercase tracking-wide">Most Likely (50th %ile)</h4>
+                <p className="text-3xl font-bold">${riskMetrics.percentiles.p50.toFixed(0)}</p>
+                <p className="text-sm text-gray-300 mt-2">{((riskMetrics.percentiles.p50 - initialValue) / initialValue * 100).toFixed(1)}% return</p>
+              </div>
+              <div className="p-6 bg-green-950/30 border border-green-900 rounded-xl">
+                <h4 className="font-medium text-sm mb-2 text-green-300 uppercase tracking-wide">Best Case (90th %ile)</h4>
+                <p className="text-3xl font-bold">${riskMetrics.percentiles.p90.toFixed(0)}</p>
+                <p className="text-sm text-gray-300 mt-2">{((riskMetrics.percentiles.p90 - initialValue) / initialValue * 100).toFixed(1)}% return</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
+
+export default PortfolioPath;
