@@ -1,11 +1,12 @@
 """Monte Carlo simulation engine using NumPy for performance."""
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dataclasses import dataclass
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-executor = ThreadPoolExecutor(max_workers=2)
+# Shared thread pool for CPU-bound simulations
+_executor = ThreadPoolExecutor(max_workers=2)
 
 
 @dataclass
@@ -34,11 +35,9 @@ class MonteCarloEngine:
         config: SimulationConfig
     ) -> Dict[str, Any]:
         """Run Monte Carlo simulation synchronously."""
-        
         # Time parameters
         years = config.time_horizon
         months = years * 12
-        dt = 1 / 12  # Monthly time step
         
         # Initialize arrays
         num_sims = config.num_simulations
@@ -164,7 +163,7 @@ class MonteCarloEngine:
         """Run Monte Carlo simulation asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             MonteCarloEngine._run_simulation_sync,
             expected_return,
             volatility,
@@ -229,7 +228,7 @@ class MonteCarloEngine:
         """Calculate portfolio metrics asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             MonteCarloEngine._calculate_portfolio_metrics_sync,
             holdings,
             historical_data
@@ -303,7 +302,7 @@ class MonteCarloEngine:
         """Generate efficient frontier asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             MonteCarloEngine._generate_efficient_frontier_sync,
             tickers,
             returns_data,

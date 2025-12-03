@@ -28,9 +28,6 @@ class Settings(BaseSettings):
         """Get CORS origins as a list."""
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
     
-    # Redis (optional)
-    REDIS_URL: str = "redis://localhost:6379"
-    
     class Config:
         env_file = ".env"
         case_sensitive = True

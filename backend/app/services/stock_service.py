@@ -2,14 +2,12 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from functools import lru_cache
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-# Thread pool for running yfinance in async context
-executor = ThreadPoolExecutor(max_workers=4)
+# Shared thread pool for blocking yfinance calls
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 class StockService:
@@ -70,7 +68,7 @@ class StockService:
         """Get a stock quote asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             StockService._sync_get_quote,
             ticker
         )
@@ -90,7 +88,7 @@ class StockService:
         """Get multiple stock quotes asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             StockService._sync_get_batch_quotes,
             tickers
         )
@@ -157,7 +155,7 @@ class StockService:
         """Get historical data asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             StockService._sync_get_historical,
             ticker,
             period,
@@ -189,7 +187,7 @@ class StockService:
         """Validate a ticker asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             StockService._sync_validate_ticker,
             ticker
         )
@@ -245,7 +243,7 @@ class StockService:
         """Search for tickers asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             StockService._sync_search_tickers,
             query
         )
@@ -286,7 +284,7 @@ class StockService:
         """Calculate correlation matrix asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            executor,
+            _executor,
             StockService._sync_get_correlation_matrix,
             tickers,
             period

@@ -41,17 +41,6 @@ class SearchResult(BaseModel):
     name: str
 
 
-class HistoricalDataPoint(BaseModel):
-    """Single historical data point."""
-    date: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: int
-    return_pct: Optional[float] = 0
-
-
 class Statistics(BaseModel):
     """Historical statistics."""
     mean_return: float
@@ -59,13 +48,6 @@ class Statistics(BaseModel):
     sharpe_ratio: float
     max_drawdown: float
     total_return: float
-
-
-class HistoricalResponse(BaseModel):
-    """Historical data response."""
-    ticker: str
-    statistics: Statistics
-    data_points: int
 
 
 # ============ Endpoints ============

@@ -1,4 +1,5 @@
 """Monte Carlo simulation API endpoints."""
+import math
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -208,18 +209,14 @@ async def calculate_goal_probability(
     # Run simulation
     results = await run_simulation(request)
     
-    # Calculate goal probability from results
-    # We use the percentile data to estimate
+    # Calculate goal probability from final values
     final_values = results["final_values"]
-    
-    # Estimate probability using normal approximation
-    import numpy as np
     mean = final_values["mean"]
     std = final_values["std"]
     
     if std > 0:
         z_score = (target_amount - mean) / std
-        probability = 1 - 0.5 * (1 + np.math.erf(z_score / np.sqrt(2)))
+        probability = 1 - 0.5 * (1 + math.erf(z_score / math.sqrt(2)))
     else:
         probability = 1.0 if mean >= target_amount else 0.0
     
