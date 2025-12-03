@@ -1,18 +1,22 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { 
+  registerUser as apiRegister, 
+  loginUser as apiLogin, 
+  logoutUser as apiLogout,
+  getCurrentUser as apiGetCurrentUser,
+  getAuthToken,
+  savePortfolio as apiSavePortfolio,
+  loadPortfolios as apiLoadPortfolios,
+  deletePortfolio as apiDeletePortfolio
+} from '../services/api';
 
 /**
  * AuthContext - Authentication & User Management
  * 
- * This is a CLIENT-SIDE ONLY implementation for demonstration.
- * For production, you MUST implement:
- * 1. Backend API (Node.js/Express, Python/Flask, etc.)
- * 2. Secure password hashing (bcrypt, argon2)
- * 3. JWT tokens or session-based auth
- * 4. Database (PostgreSQL, MongoDB, etc.)
- * 5. HTTPS encryption
- * 6. Rate limiting & CAPTCHA
- * 
- * Current implementation uses localStorage - NOT secure for production!
+ * Connected to FastAPI backend with:
+ * - JWT token authentication
+ * - Secure password hashing (bcrypt)
+ * - SQLite database persistence
  */
 
 const AuthContext = createContext(null);
@@ -31,48 +35,34 @@ export const AuthProvider = ({ children }) => {
 
   // Check for existing session on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem('portfoliopath_user');
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (e) {
-        localStorage.removeItem('portfoliopath_user');
+    const checkAuth = async () => {
+      const token = getAuthToken();
+      if (token) {
+        try {
+          const userData = await apiGetCurrentUser();
+          setUser(userData);
+        } catch (e) {
+          // Token invalid or expired
+          console.log('Session expired or invalid');
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+    checkAuth();
   }, []);
 
   /**
    * Register a new user
-   * TODO: Replace with API call to backend
    */
   const register = async (email, password, name) => {
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Check if user already exists (localStorage demo only)
-      const existingUsers = JSON.parse(localStorage.getItem('portfoliopath_users') || '[]');
-      if (existingUsers.some(u => u.email === email)) {
-        throw new Error('Email already registered');
-      }
-
-      const newUser = {
-        id: Date.now().toString(),
-        email,
-        name,
-        createdAt: new Date().toISOString(),
-        portfolios: []
-      };
-
-      // Store user (INSECURE - for demo only)
-      existingUsers.push({ ...newUser, password }); // Never store plain passwords!
-      localStorage.setItem('portfoliopath_users', JSON.stringify(existingUsers));
+      // Register user with backend
+      const newUser = await apiRegister(email, password, name, name);
       
-      // Set current user (without password)
-      const { password: _, ...userWithoutPassword } = newUser;
-      setUser(userWithoutPassword);
-      localStorage.setItem('portfoliopath_user', JSON.stringify(userWithoutPassword));
+      // Auto-login after registration
+      await apiLogin(email, password);
+      const userData = await apiGetCurrentUser();
+      setUser(userData);
 
       return { success: true };
     } catch (error) {
@@ -82,23 +72,12 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Login existing user
-   * TODO: Replace with API call to backend
    */
   const login = async (email, password) => {
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const existingUsers = JSON.parse(localStorage.getItem('portfoliopath_users') || '[]');
-      const foundUser = existingUsers.find(u => u.email === email && u.password === password);
-
-      if (!foundUser) {
-        throw new Error('Invalid email or password');
-      }
-
-      const { password: _, ...userWithoutPassword } = foundUser;
-      setUser(userWithoutPassword);
-      localStorage.setItem('portfoliopath_user', JSON.stringify(userWithoutPassword));
+      await apiLogin(email, password);
+      const userData = await apiGetCurrentUser();
+      setUser(userData);
 
       return { success: true };
     } catch (error) {
@@ -110,45 +89,19 @@ export const AuthProvider = ({ children }) => {
    * Logout current user
    */
   const logout = () => {
+    apiLogout();
     setUser(null);
-    localStorage.removeItem('portfoliopath_user');
   };
 
   /**
    * Save a portfolio for the current user
    */
-  const savePortfolio = (portfolioData) => {
+  const savePortfolio = async (portfolioData) => {
     if (!user) return { success: false, error: 'Not authenticated' };
 
     try {
-      const portfolio = {
-        id: Date.now().toString(),
-        name: portfolioData.name || `Portfolio ${new Date().toLocaleDateString()}`,
-        data: portfolioData,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      // Update user's portfolios
-      const existingUsers = JSON.parse(localStorage.getItem('portfoliopath_users') || '[]');
-      const userIndex = existingUsers.findIndex(u => u.id === user.id);
-      
-      if (userIndex !== -1) {
-        if (!existingUsers[userIndex].portfolios) {
-          existingUsers[userIndex].portfolios = [];
-        }
-        existingUsers[userIndex].portfolios.push(portfolio);
-        localStorage.setItem('portfoliopath_users', JSON.stringify(existingUsers));
-
-        // Update current user state
-        const updatedUser = { ...user, portfolios: [...(user.portfolios || []), portfolio] };
-        setUser(updatedUser);
-        localStorage.setItem('portfoliopath_user', JSON.stringify(updatedUser));
-
-        return { success: true, portfolio };
-      }
-
-      throw new Error('User not found');
+      const portfolio = await apiSavePortfolio(portfolioData);
+      return { success: true, portfolio };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -157,37 +110,26 @@ export const AuthProvider = ({ children }) => {
   /**
    * Load saved portfolios for current user
    */
-  const getPortfolios = () => {
-    return user?.portfolios || [];
+  const getPortfolios = async () => {
+    if (!user) return [];
+    try {
+      const portfolios = await apiLoadPortfolios();
+      return portfolios;
+    } catch (error) {
+      console.error('Error loading portfolios:', error);
+      return [];
+    }
   };
 
   /**
    * Delete a portfolio
    */
-  const deletePortfolio = (portfolioId) => {
+  const deletePortfolio = async (portfolioId) => {
     if (!user) return { success: false, error: 'Not authenticated' };
 
     try {
-      const existingUsers = JSON.parse(localStorage.getItem('portfoliopath_users') || '[]');
-      const userIndex = existingUsers.findIndex(u => u.id === user.id);
-      
-      if (userIndex !== -1) {
-        existingUsers[userIndex].portfolios = existingUsers[userIndex].portfolios.filter(
-          p => p.id !== portfolioId
-        );
-        localStorage.setItem('portfoliopath_users', JSON.stringify(existingUsers));
-
-        const updatedUser = { 
-          ...user, 
-          portfolios: existingUsers[userIndex].portfolios 
-        };
-        setUser(updatedUser);
-        localStorage.setItem('portfoliopath_user', JSON.stringify(updatedUser));
-
-        return { success: true };
-      }
-
-      throw new Error('User not found');
+      await apiDeletePortfolio(portfolioId);
+      return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }

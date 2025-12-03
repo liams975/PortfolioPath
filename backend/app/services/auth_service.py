@@ -1,5 +1,5 @@
 """Authentication service for JWT token management."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 import bcrypt
@@ -35,10 +35,14 @@ class AuthService:
     def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """Create a JWT access token."""
         to_encode = data.copy()
+        # Ensure sub is a string
+        if 'sub' in to_encode:
+            to_encode['sub'] = str(to_encode['sub'])
+        
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         
         to_encode.update({"exp": expire, "type": "access"})
         encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
@@ -48,7 +52,11 @@ class AuthService:
     def create_refresh_token(data: dict) -> str:
         """Create a JWT refresh token."""
         to_encode = data.copy()
-        expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        # Ensure sub is a string
+        if 'sub' in to_encode:
+            to_encode['sub'] = str(to_encode['sub'])
+        
+        expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         to_encode.update({"exp": expire, "type": "refresh"})
         encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
@@ -125,8 +133,13 @@ async def get_current_user(db: AsyncSession, token: str) -> Optional[User]:
     if payload is None:
         return None
     
-    user_id: int = payload.get("sub")
-    if user_id is None:
+    user_id_str = payload.get("sub")
+    if user_id_str is None:
+        return None
+    
+    try:
+        user_id = int(user_id_str)
+    except (ValueError, TypeError):
         return None
     
     user = await AuthService.get_user_by_id(db, user_id)

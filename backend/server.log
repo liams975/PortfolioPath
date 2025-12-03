@@ -1,0 +1,32 @@
+INFO:     Started server process [42244]
+INFO:     Waiting for application startup.
+🚀 Starting PortfolioPath API...
+2025-12-03 10:28:10,703 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2025-12-03 10:28:10,703 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("users")
+2025-12-03 10:28:10,703 INFO sqlalchemy.engine.Engine [raw sql] ()
+2025-12-03 10:28:10,704 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("portfolios")
+2025-12-03 10:28:10,704 INFO sqlalchemy.engine.Engine [raw sql] ()
+2025-12-03 10:28:10,704 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("portfolio_holdings")
+2025-12-03 10:28:10,704 INFO sqlalchemy.engine.Engine [raw sql] ()
+2025-12-03 10:28:10,704 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+✅ Database tables created
+INFO:     127.0.0.1:54439 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54572 - "GET /health HTTP/1.1" 200 OK
+2025-12-03 10:28:22,179 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2025-12-03 10:28:22,205 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.username, users.hashed_password, users.full_name, users.is_active, users.is_verified, users.created_at, users.updated_at, users.last_login 
+FROM users 
+WHERE users.email = ?
+2025-12-03 10:28:22,205 INFO sqlalchemy.engine.Engine [generated in 0.00017s] ('demo@test.com',)
+2025-12-03 10:28:22,459 INFO sqlalchemy.engine.Engine UPDATE users SET updated_at=?, last_login=? WHERE users.id = ?
+2025-12-03 10:28:22,459 INFO sqlalchemy.engine.Engine [generated in 0.00015s] ('2025-12-03 18:28:22.459507', '2025-12-03 18:28:22.458638', 3)
+2025-12-03 10:28:22,460 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:54839 - "POST /api/auth/login HTTP/1.1" 200 OK
+2025-12-03 10:28:22,486 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2025-12-03 10:28:22,486 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.username, users.hashed_password, users.full_name, users.is_active, users.is_verified, users.created_at, users.updated_at, users.last_login 
+FROM users 
+WHERE users.id = ?
+2025-12-03 10:28:22,486 INFO sqlalchemy.engine.Engine [generated in 0.00007s] (3,)
+INFO:     127.0.0.1:54853 - "GET /api/auth/me HTTP/1.1" 200 OK
+2025-12-03 10:28:22,487 INFO sqlalchemy.engine.Engine ROLLBACK

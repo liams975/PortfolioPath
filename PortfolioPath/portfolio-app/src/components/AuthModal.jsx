@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Mail, Lock, User, AlertCircle } from 'lucide-react';
+import { X, Mail, Lock, User, AlertCircle, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
@@ -26,6 +26,11 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
       } else {
         if (!name.trim()) {
           setError('Name is required');
+          setLoading(false);
+          return;
+        }
+        if (password.length < 8) {
+          setError('Password must be at least 8 characters');
           setLoading(false);
           return;
         }
@@ -73,10 +78,10 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
           </p>
         </div>
 
-        <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3 mb-4 flex gap-2">
-          <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+        <div className="bg-emerald-900/30 border border-emerald-700/50 rounded-lg p-3 mb-4 flex gap-2">
+          <Shield className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
           <p className="text-xs text-zinc-400">
-            <strong>Demo:</strong> Client-side only. Use any email/password.
+            <strong className="text-emerald-400">Secure:</strong> Backend authentication with encrypted passwords.
           </p>
         </div>
 
@@ -90,7 +95,7 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
             <div>
-              <label className="block text-xs font-medium mb-1.5 text-zinc-400 uppercase tracking-wider">Name</label>
+              <label className="block text-xs font-medium mb-1.5 text-zinc-400 uppercase tracking-wider">Username</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
                 <input
@@ -98,8 +103,9 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg pl-10 pr-4 py-2.5 text-zinc-100 placeholder-zinc-600 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm"
-                  placeholder="John Doe"
+                  placeholder="johndoe"
                   required={mode === 'register'}
+                  minLength={3}
                 />
               </div>
             </div>
@@ -121,7 +127,9 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
           </div>
 
           <div>
-            <label className="block text-xs font-medium mb-1.5 text-zinc-400 uppercase tracking-wider">Password</label>
+            <label className="block text-xs font-medium mb-1.5 text-zinc-400 uppercase tracking-wider">
+              Password {mode === 'register' && <span className="text-zinc-600">(min 8 chars)</span>}
+            </label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
               <input
@@ -131,7 +139,7 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
                 className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg pl-10 pr-4 py-2.5 text-zinc-100 placeholder-zinc-600 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm"
                 placeholder="••••••••"
                 required
-                minLength={6}
+                minLength={mode === 'register' ? 8 : 1}
               />
             </div>
           </div>
