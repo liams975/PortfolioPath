@@ -11,7 +11,7 @@ import { exportToCSV, exportToPDF } from './utils/exportUtils';
 import { savePortfolioLocal, loadPortfoliosLocal, cacheSimulationResults, getCachedSimulation, savePreferences, loadPreferences } from './services/cache';
 import { toast } from './utils/toast';
 import { handleError, retryWithBackoff } from './utils/errorHandler';
-import { checkApiHealth, runSimulation as runBackendSimulation } from './services/api';
+import { checkApiHealth, runSimulation as runBackendSimulation, fetchAssetParameters } from './services/api';
 
 /**
  * ============================================================================
@@ -747,6 +747,21 @@ const transformBackendResponse = (backendResponse, timeHorizonDays) => {
   return paths;
 };
 
+/**
+ * Extract backend metrics (expected return and volatility) from response
+ * These are the INPUT parameters used in the Monte Carlo, based on real historical data
+ */
+const extractBackendMetrics = (backendResponse) => {
+  if (!backendResponse?.summary) return null;
+  
+  return {
+    expectedReturn: backendResponse.summary.expected_return * 100, // Convert to percentage
+    volatility: backendResponse.summary.volatility * 100, // Convert to percentage
+    initialInvestment: backendResponse.summary.initial_investment,
+    timeHorizon: backendResponse.summary.time_horizon,
+  };
+};
+
 // RISK METRICS (same as before with safety checks)
 // ============================================================================
 
@@ -845,6 +860,11 @@ const PortfolioPath = () => {
   // NEW: Benchmark
   const [showBenchmark, setShowBenchmark] = useState(true);
   const [benchmarkTicker, setBenchmarkTicker] = useState('SPY');
+  const [benchmarkData, setBenchmarkData] = useState(null); // Real benchmark data from backend
+  
+  // NEW: Backend-sourced metrics (expected_return and volatility from real data)
+  const [backendMetrics, setBackendMetrics] = useState(null);
+  const [comparisonBackendMetrics, setComparisonBackendMetrics] = useState(null);
   
   // NEW: Efficient frontier
   const [showEfficientFrontier, setShowEfficientFrontier] = useState(false);
@@ -1016,6 +1036,10 @@ const PortfolioPath = () => {
           // Transform backend response to frontend format
           const transformedResults = transformBackendResponse(backendResponse, timeHorizon);
           
+          // Extract and store backend metrics (real expected return and volatility)
+          const metrics = extractBackendMetrics(backendResponse);
+          setBackendMetrics(metrics);
+          
           if (transformedResults) {
             setSimulationProgress(100);
             setSimulationResults(transformedResults);
@@ -1044,6 +1068,9 @@ const PortfolioPath = () => {
                 const compTransformed = transformBackendResponse(compBackendResponse, timeHorizon);
                 if (compTransformed) {
                   setComparisonResults(compTransformed);
+                  // Store comparison metrics
+                  const compMetrics = extractBackendMetrics(compBackendResponse);
+                  setComparisonBackendMetrics(compMetrics);
                 }
               } catch (compError) {
                 console.warn('Comparison simulation failed, using client-side fallback:', compError);
@@ -1056,9 +1083,11 @@ const PortfolioPath = () => {
                   { ...advancedOptions, scenarios }
                 );
                 setComparisonResults(compResults);
+                setComparisonBackendMetrics(null); // No backend metrics for client-side
               }
             } else {
               setComparisonResults(null);
+              setComparisonBackendMetrics(null);
             }
             
             setIsSimulating(false);
@@ -1098,6 +1127,9 @@ const PortfolioPath = () => {
         setSimulationProgress(100);
         setSimulationResults(results);
         
+        // Clear backend metrics when using client-side simulation
+        setBackendMetrics(null);
+        
         // Cache results
         cacheSimulationResults(getCurrentPortfolioData(), results, calculateRiskMetrics(results, initialValue, timeHorizon));
         
@@ -1114,8 +1146,10 @@ const PortfolioPath = () => {
             }
           );
           setComparisonResults(compResults);
+          setComparisonBackendMetrics(null);
         } else {
           setComparisonResults(null);
+          setComparisonBackendMetrics(null);
         }
         
         setIsSimulating(false);
@@ -1150,14 +1184,37 @@ const PortfolioPath = () => {
 
   const riskMetrics = useMemo(() => {
     if (!simulationResults) return null;
-    return calculateRiskMetrics(simulationResults, initialValue, timeHorizon);
-  }, [simulationResults, initialValue, timeHorizon]);
+    const calculatedMetrics = calculateRiskMetrics(simulationResults, initialValue, timeHorizon);
+    
+    // If we have backend metrics, use the backend's expected return and volatility
+    // These are based on real historical data, not simulation results
+    if (backendMetrics && calculatedMetrics) {
+      return {
+        ...calculatedMetrics,
+        mean: backendMetrics.expectedReturn, // Use backend's expected return (based on historical data)
+        volatility: backendMetrics.volatility, // Use backend's volatility (based on historical data)
+      };
+    }
+    
+    return calculatedMetrics;
+  }, [simulationResults, initialValue, timeHorizon, backendMetrics]);
   
   // Comparison risk metrics
   const comparisonRiskMetrics = useMemo(() => {
     if (!comparisonResults) return null;
-    return calculateRiskMetrics(comparisonResults, initialValue, timeHorizon);
-  }, [comparisonResults, initialValue, timeHorizon]);
+    const calculatedMetrics = calculateRiskMetrics(comparisonResults, initialValue, timeHorizon);
+    
+    // If we have backend metrics for comparison, use them
+    if (comparisonBackendMetrics && calculatedMetrics) {
+      return {
+        ...calculatedMetrics,
+        mean: comparisonBackendMetrics.expectedReturn,
+        volatility: comparisonBackendMetrics.volatility,
+      };
+    }
+    
+    return calculatedMetrics;
+  }, [comparisonResults, initialValue, timeHorizon, comparisonBackendMetrics]);
 
   // Goal probability calculation
   const goalProbability = useMemo(() => {
@@ -1380,20 +1437,63 @@ const PortfolioPath = () => {
     return points;
   }, [showEfficientFrontier, riskMetrics, comparisonRiskMetrics, portfolio]);
 
-  // Benchmark simulation for comparison
+  // Fetch benchmark data when ticker changes or simulation runs
+  useEffect(() => {
+    const fetchBenchmarkData = async () => {
+      if (!simulationResults || !benchmarkTicker || !backendConnected) {
+        // Use fallback from assetDatabase when backend unavailable
+        const fallbackParams = assetDatabase[benchmarkTicker] || { mean: 0.0003, vol: 0.012 };
+        setBenchmarkData({
+          mean: fallbackParams.mean * 252 * 100, // Annualized return %
+          volatility: fallbackParams.vol * Math.sqrt(252) * 100, // Annualized volatility %
+          ticker: benchmarkTicker,
+          source: 'fallback'
+        });
+        return;
+      }
+      
+      try {
+        // Fetch real historical data for benchmark
+        const params = await fetchAssetParameters(benchmarkTicker);
+        setBenchmarkData({
+          mean: params.mean * 100, // Already annualized from backend, convert to %
+          volatility: params.vol * 100, // Already annualized from backend, convert to %
+          ticker: benchmarkTicker,
+          source: 'backend'
+        });
+      } catch (error) {
+        console.warn('Failed to fetch benchmark data, using fallback:', error);
+        // Use fallback from assetDatabase
+        const fallbackParams = assetDatabase[benchmarkTicker] || { mean: 0.0003, vol: 0.012 };
+        setBenchmarkData({
+          mean: fallbackParams.mean * 252 * 100,
+          volatility: fallbackParams.vol * Math.sqrt(252) * 100,
+          ticker: benchmarkTicker,
+          source: 'fallback'
+        });
+      }
+    };
+    
+    fetchBenchmarkData();
+  }, [simulationResults, benchmarkTicker, backendConnected]);
+
+  // Benchmark simulation for comparison (use benchmarkData state)
   const benchmarkSimulation = useMemo(() => {
     if (!simulationResults || !benchmarkTicker) return null;
     
-    // Use benchmark-specific parameters
-    const benchmarkParams = assetDatabase[benchmarkTicker] || { mean: 0.0003, vol: 0.012 };
+    // Use real benchmark data if available, otherwise use assetDatabase
+    if (benchmarkData) {
+      return benchmarkData;
+    }
     
-    // Calculate annualized metrics for benchmark
+    // Fallback to hardcoded values
+    const benchmarkParams = assetDatabase[benchmarkTicker] || { mean: 0.0003, vol: 0.012 };
     return {
-      mean: benchmarkParams.mean * 252 * 100, // Annualized return %
-      volatility: benchmarkParams.vol * Math.sqrt(252) * 100, // Annualized volatility %
+      mean: benchmarkParams.mean * 252 * 100,
+      volatility: benchmarkParams.vol * Math.sqrt(252) * 100,
       ticker: benchmarkTicker
     };
-  }, [simulationResults, benchmarkTicker]);
+  }, [simulationResults, benchmarkTicker, benchmarkData]);
 
   // Page transition variants for Framer Motion - minimal transitions to avoid flash
   const pageVariants = {
