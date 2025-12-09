@@ -833,7 +833,7 @@ const PortfolioPath = () => {
     { ticker: 'BND', weight: 0.4 }
   ]);
   const [initialValue, setInitialValue] = useState(10000);
-  const [timeHorizon, setTimeHorizon] = useState(250);
+  const [timeHorizon, setTimeHorizon] = useState(252);
   const [numSimulations, setNumSimulations] = useState(1000);
   const [scenarios, setScenarios] = useState({});
   const [advancedOptions, setAdvancedOptions] = useState({
@@ -1453,13 +1453,15 @@ const PortfolioPath = () => {
       }
       
       try {
-        // Fetch real historical data for benchmark
-        const params = await fetchAssetParameters(benchmarkTicker);
+        // Fetch real historical data for benchmark using same time horizon as portfolio
+        const params = await fetchAssetParameters(benchmarkTicker, timeHorizon);
         setBenchmarkData({
           mean: params.mean * 100, // Already annualized from backend, convert to %
           volatility: params.vol * 100, // Already annualized from backend, convert to %
           ticker: benchmarkTicker,
-          source: 'backend'
+          source: 'backend',
+          dataPoints: params.dataPoints,
+          weighted: params.weighted
         });
       } catch (error) {
         console.warn('Failed to fetch benchmark data, using fallback:', error);
@@ -1475,7 +1477,7 @@ const PortfolioPath = () => {
     };
     
     fetchBenchmarkData();
-  }, [simulationResults, benchmarkTicker, backendConnected]);
+  }, [simulationResults, benchmarkTicker, backendConnected, timeHorizon]);
 
   // Benchmark simulation for comparison (use benchmarkData state)
   const benchmarkSimulation = useMemo(() => {
@@ -1707,11 +1709,11 @@ const PortfolioPath = () => {
               </div>
 
               <div className="mb-5">
-                <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Time Horizon (Days) — Max 1000</label>
+                <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Time Horizon (Days) — Default 252 (1 year)</label>
                 <input
                   type="number"
                   value={timeHorizon}
-                  onChange={(e) => setTimeHorizon(Math.max(1, Math.min(1000, parseInt(e.target.value) || 250)))}
+                  onChange={(e) => setTimeHorizon(Math.max(1, Math.min(1000, parseInt(e.target.value) || 252)))}
                   min="1"
                   max="1000"
                   className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono"

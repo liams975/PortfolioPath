@@ -55,10 +55,18 @@ async def run_simulation(request: SimulationRequest):
             detail=f"Holdings must sum to 100% (current: {total_allocation}%)"
         )
     
-    # Fetch historical data for each holding
+    # Convert time horizon years to trading days for weighted averaging
+    # Default to 252 trading days per year
+    target_days = request.time_horizon * 252
+    
+    # Fetch historical data for each holding with weighted statistics
     historical_data = {}
     for holding in request.holdings:
-        hist = await StockService.get_historical(holding.ticker, period="5y")
+        hist = await StockService.get_historical(
+            holding.ticker, 
+            period="max",  # Fetch max data for better weighting
+            target_days=target_days  # Use time horizon for weighted averaging
+        )
         if hist:
             returns = [d['return'] for d in hist['data'] if d['return'] != 0]
             historical_data[holding.ticker] = {

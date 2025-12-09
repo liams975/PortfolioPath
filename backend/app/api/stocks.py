@@ -124,21 +124,25 @@ async def get_batch_quotes(request: BatchTickersRequest):
 async def get_historical(
     ticker: str,
     period: str = Query(default="5y", regex="^(1mo|3mo|6mo|1y|2y|5y|10y|max)$"),
-    interval: str = Query(default="1d", regex="^(1d|1wk|1mo)$")
+    interval: str = Query(default="1d", regex="^(1d|1wk|1mo)$"),
+    target_days: Optional[int] = Query(default=None, ge=21, le=5040, description="Target time horizon in trading days for weighted averaging. If specified, recent data gets exponentially more weight.")
 ):
     """
-    Get historical price data for a ticker.
+    Get historical price data for a ticker with optional weighted statistics.
     
     - **ticker**: Stock ticker symbol
     - **period**: Time period (1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, max)
     - **interval**: Data interval (1d, 1wk, 1mo)
+    - **target_days**: Target time horizon in trading days for weighted averaging (21-5040 days).
+                      If specified, calculates statistics with exponential weighting,
+                      giving more weight to recent data. Default 252 days = 1 year.
     """
     try:
         ticker = validate_ticker_symbol(ticker)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-    data = await StockService.get_historical(ticker, period, interval)
+    data = await StockService.get_historical(ticker, period, interval, target_days)
     
     if not data:
         raise HTTPException(

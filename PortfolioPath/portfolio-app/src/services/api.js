@@ -171,10 +171,14 @@ export const fetchBatchQuotes = async (tickers) => {
   }
 };
 
-export const fetchHistoricalData = async (ticker, period = '5y') => {
+export const fetchHistoricalData = async (ticker, period = '5y', targetDays = null) => {
   try {
+    let url = `${API_CONFIG.BASE_URL}/api/stocks/historical/${ticker}?period=${period}`;
+    if (targetDays) {
+      url += `&target_days=${targetDays}`;
+    }
     const response = await fetch(
-      `${API_CONFIG.BASE_URL}/api/stocks/historical/${ticker}?period=${period}`,
+      url,
       { signal: AbortSignal.timeout(API_CONFIG.TIMEOUT) }
     );
     if (!response.ok) {
@@ -192,16 +196,18 @@ export const fetchHistoricalData = async (ticker, period = '5y') => {
   }
 };
 
-export const fetchAssetParameters = async (ticker) => {
+export const fetchAssetParameters = async (ticker, targetDays = 252) => {
   try {
-    const data = await fetchHistoricalData(ticker, '5y');
+    const data = await fetchHistoricalData(ticker, 'max', targetDays);
     return { 
       mean: data.statistics?.mean_return || 0.0003, 
       vol: data.statistics?.volatility || 0.015, 
       name: data.ticker,
       sharpeRatio: data.statistics?.sharpe_ratio || 0,
       maxDrawdown: data.statistics?.max_drawdown || 0,
-      totalReturn: data.statistics?.total_return || 0
+      totalReturn: data.statistics?.total_return || 0,
+      dataPoints: data.statistics?.data_points || 0,
+      weighted: data.statistics?.weighted || false
     };
   } catch {
     return { mean: 0.0003, vol: 0.015, name: ticker.toUpperCase() };

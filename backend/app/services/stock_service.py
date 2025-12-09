@@ -94,24 +94,87 @@ class StockService:
         )
     
     @staticmethod
+    def _calculate_exponential_weights(n_periods: int, half_life: int = 126) -> np.ndarray:
+        """
+        Calculate exponential weights for time series data.
+        More recent data gets higher weight.
+        
+        Args:
+            n_periods: Number of periods to weight
+            half_life: Number of periods for weight to decay by half (default: 6 months)
+        
+        Returns:
+            Normalized weight array (sums to 1)
+        """
+        decay = np.log(2) / half_life
+        weights = np.exp(-decay * np.arange(n_periods)[::-1])  # Reverse so recent data has higher weight
+        return weights / weights.sum()  # Normalize to sum to 1
+    
+    @staticmethod
     def _sync_get_historical(
         ticker: str,
         period: str = "5y",
-        interval: str = "1d"
+        interval: str = "1d",
+        target_days: int = None
     ) -> Optional[Dict[str, Any]]:
-        """Synchronously get historical data."""
+        """
+        Synchronously get historical data with weighted statistics.
+        
+        If target_days is specified, calculates weighted statistics giving
+        exponentially more weight to recent data up to target_days.
+        
+        Args:
+            ticker: Stock ticker symbol
+            period: yfinance period string (default: 5y to get ample data)
+            interval: Data interval (default: 1d)
+            target_days: Target time horizon in trading days for weighted average
+                        If None, uses all data equally weighted
+        """
         try:
             stock = yf.Ticker(ticker)
-            hist = stock.history(period=period, interval=interval)
+            # Always fetch maximum available data for better statistics
+            hist = stock.history(period="max", interval=interval)
             
             if hist.empty:
-                return None
+                # Fallback to requested period
+                hist = stock.history(period=period, interval=interval)
+                if hist.empty:
+                    return None
             
             # Calculate returns
             hist['Returns'] = hist['Close'].pct_change()
+            returns = hist['Returns'].dropna()
+            
+            if len(returns) < 20:
+                return None  # Not enough data
             
             # Calculate statistics
-            returns = hist['Returns'].dropna()
+            # Use target_days to determine weighting scheme
+            if target_days and target_days > 0:
+                # Use exponential weighting with half-life based on target days
+                # Half-life is set to half the target period for smooth weighting
+                half_life = max(21, target_days // 2)  # Minimum 1 month half-life
+                
+                # Get the most relevant data (up to 3x target_days for stability)
+                lookback = min(len(returns), target_days * 3)
+                recent_returns = returns.tail(lookback)
+                
+                weights = StockService._calculate_exponential_weights(len(recent_returns), half_life)
+                
+                # Weighted mean and volatility
+                weighted_mean = np.average(recent_returns.values, weights=weights)
+                weighted_var = np.average((recent_returns.values - weighted_mean)**2, weights=weights)
+                weighted_vol = np.sqrt(weighted_var)
+                
+                # Annualize
+                mean_annual = weighted_mean * 252
+                vol_annual = weighted_vol * np.sqrt(252)
+            else:
+                # Use equal weighting for all data (traditional approach)
+                mean_annual = float(returns.mean() * 252)
+                vol_annual = float(returns.std() * np.sqrt(252))
+            
+            sharpe = mean_annual / vol_annual if vol_annual > 0 else 0
             
             return {
                 "ticker": ticker.upper(),
@@ -128,11 +191,13 @@ class StockService:
                     for date, row in hist.iterrows()
                 ],
                 "statistics": {
-                    "mean_return": float(returns.mean() * 252),  # Annualized
-                    "volatility": float(returns.std() * np.sqrt(252)),  # Annualized
-                    "sharpe_ratio": float((returns.mean() * 252) / (returns.std() * np.sqrt(252))) if returns.std() > 0 else 0,
+                    "mean_return": float(mean_annual),  # Annualized weighted
+                    "volatility": float(vol_annual),  # Annualized weighted
+                    "sharpe_ratio": float(sharpe),
                     "max_drawdown": float(StockService._calculate_max_drawdown(hist['Close'])),
                     "total_return": float((hist['Close'].iloc[-1] / hist['Close'].iloc[0]) - 1),
+                    "data_points": len(returns),
+                    "weighted": target_days is not None,
                 }
             }
         except Exception as e:
@@ -150,16 +215,23 @@ class StockService:
     async def get_historical(
         ticker: str,
         period: str = "5y",
-        interval: str = "1d"
+        interval: str = "1d",
+        target_days: int = None
     ) -> Optional[Dict[str, Any]]:
-        """Get historical data asynchronously."""
+        """
+        Get historical data asynchronously with optional weighted statistics.
+        
+        Args:
+            ticker: Stock ticker symbol
+            period: yfinance period string (default: 5y)
+            interval: Data interval (default: 1d)
+            target_days: Target time horizon in trading days for weighted average
+                        If specified, recent data gets exponentially more weight
+        """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             _executor,
-            StockService._sync_get_historical,
-            ticker,
-            period,
-            interval
+            lambda: StockService._sync_get_historical(ticker, period, interval, target_days)
         )
     
     @staticmethod
