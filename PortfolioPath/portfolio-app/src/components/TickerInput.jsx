@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Check, X, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
+import { validateTicker, fetchStockQuote } from '../services/api';
 
-// Simulated stock data API (in production, use Alpha Vantage, Yahoo Finance, etc.)
-// The "change" field shows the simulated daily % change - this is for display only
+// Fallback stock database for offline mode
 const STOCK_DATABASE = {
   // Major Indices & ETFs
   'SPY': { name: 'SPDR S&P 500 ETF', price: 478.32, change: 0.45, sector: 'Index' },
@@ -104,14 +104,54 @@ const STOCK_DATABASE = {
   'MSTR': { name: 'MicroStrategy', price: 456.78, change: 3.45, sector: 'Technology' },
 };
 
-// Simulated API call with delay
+// Fetch ticker info from backend API with fallback to local database
 const fetchTickerInfo = async (ticker) => {
-  await new Promise(resolve => setTimeout(resolve, 300 + Math.random() * 200));
   const upperTicker = ticker.toUpperCase();
-  if (STOCK_DATABASE[upperTicker]) {
-    return { valid: true, ...STOCK_DATABASE[upperTicker] };
+  
+  try {
+    // Try backend validation first
+    const isValid = await validateTicker(upperTicker);
+    
+    if (isValid) {
+      // Fetch real quote from backend
+      try {
+        const quote = await fetchStockQuote(upperTicker);
+        if (quote && quote.price) {
+          return {
+            valid: true,
+            name: quote.name || quote.longName || upperTicker,
+            price: quote.price,
+            change: quote.changePercent || 0,
+            sector: quote.sector || 'Unknown'
+          };
+        }
+      } catch (quoteError) {
+        console.warn('Failed to fetch quote, using validation only:', quoteError);
+        // If validation passed but quote fetch failed, still return valid
+        return {
+          valid: true,
+          name: upperTicker,
+          price: 0,
+          change: 0,
+          sector: 'Unknown'
+        };
+      }
+    }
+    
+    // Backend validation failed, try local database as fallback
+    if (STOCK_DATABASE[upperTicker]) {
+      return { valid: true, ...STOCK_DATABASE[upperTicker] };
+    }
+    
+    return { valid: false };
+  } catch (error) {
+    // Backend unavailable, use local database as fallback
+    console.warn('Backend validation failed, using local database:', error);
+    if (STOCK_DATABASE[upperTicker]) {
+      return { valid: true, ...STOCK_DATABASE[upperTicker] };
+    }
+    return { valid: false };
   }
-  return { valid: false };
 };
 
 export const useTickerValidation = (ticker, debounceMs = 500) => {

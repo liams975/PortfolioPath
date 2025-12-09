@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Save, FolderOpen, Trash2, Calendar, Target, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Save, FolderOpen, Trash2, Calendar, Target, X, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const SavedPortfolios = ({ onLoadPortfolio, currentPortfolio, onClose }) => {
@@ -7,32 +7,66 @@ const SavedPortfolios = ({ onLoadPortfolio, currentPortfolio, onClose }) => {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [portfolioName, setPortfolioName] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [savedPortfolios, setSavedPortfolios] = useState([]);
+  const [loading, setLoading] = useState(true);
   
-  const savedPortfolios = getPortfolios();
+  // Load portfolios on mount
+  useEffect(() => {
+    const loadPortfolios = async () => {
+      setLoading(true);
+      try {
+        const portfolios = await getPortfolios();
+        setSavedPortfolios(portfolios || []);
+      } catch (error) {
+        console.error('Error loading portfolios:', error);
+        setSavedPortfolios([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadPortfolios();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!portfolioName.trim()) {
       setSaveError('Please enter a portfolio name');
       return;
     }
 
-    const result = savePortfolio({
-      name: portfolioName,
-      ...currentPortfolio
-    });
+    try {
+      const result = await savePortfolio({
+        name: portfolioName,
+        ...currentPortfolio
+      });
 
-    if (result.success) {
-      setShowSaveDialog(false);
-      setPortfolioName('');
-      setSaveError('');
-    } else {
-      setSaveError(result.error);
+      if (result.success) {
+        setShowSaveDialog(false);
+        setPortfolioName('');
+        setSaveError('');
+        // Reload portfolios after save
+        const portfolios = await getPortfolios();
+        setSavedPortfolios(portfolios || []);
+      } else {
+        setSaveError(result.error || 'Failed to save portfolio');
+      }
+    } catch (error) {
+      setSaveError(error.message || 'Failed to save portfolio');
     }
   };
 
-  const handleDelete = (portfolioId) => {
+  const handleDelete = async (portfolioId) => {
     if (window.confirm('Delete this portfolio?')) {
-      deletePortfolio(portfolioId);
+      try {
+        await deletePortfolio(portfolioId);
+        // Reload portfolios after delete
+        const portfolios = await getPortfolios();
+        setSavedPortfolios(portfolios || []);
+      } catch (error) {
+        console.error('Error deleting portfolio:', error);
+        alert('Failed to delete portfolio. Please try again.');
+      }
     }
   };
 
@@ -93,7 +127,12 @@ const SavedPortfolios = ({ onLoadPortfolio, currentPortfolio, onClose }) => {
         </div>
       )}
 
-      {savedPortfolios.length === 0 ? (
+      {loading ? (
+        <div className="text-center py-6 text-zinc-500">
+          <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin opacity-50" />
+          <p className="text-xs">Loading portfolios...</p>
+        </div>
+      ) : savedPortfolios.length === 0 ? (
         <div className="text-center py-6 text-zinc-500">
           <FolderOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p className="text-xs">No saved portfolios</p>

@@ -90,11 +90,15 @@ async def run_simulation(request: SimulationRequest):
             total_vol += stats['volatility'] * weight  # Simplified, ignores correlation
     
     # Get dividend yield if not specified
+    # Note: yfinance returns dividendYield as a percentage (e.g., 1.5 for 1.5%)
+    # We need to convert it to decimal (e.g., 0.015)
     if request.dividend_yield is None:
         for holding in request.holdings:
             quote = await StockService.get_quote(holding.ticker)
             if quote and quote.get('dividendYield'):
-                total_div += (quote['dividendYield'] or 0) * (holding.allocation / 100)
+                # Convert from percentage to decimal (divide by 100)
+                div_yield = (quote['dividendYield'] or 0) / 100
+                total_div += div_yield * (holding.allocation / 100)
     else:
         total_div = request.dividend_yield
     

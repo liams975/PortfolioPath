@@ -44,29 +44,29 @@ class MonteCarloEngine:
         paths = np.zeros((num_sims, months + 1))
         paths[:, 0] = config.initial_investment
         
-        # Monthly parameters
-        monthly_return = expected_return / 12
+        # Monthly parameters for GBM (log-normal model)
+        # For GBM: dS/S = mu*dt + sigma*dW
+        # Monthly drift should account for volatility drag: (mu - sigma^2/2) / 12
         monthly_vol = volatility / np.sqrt(12)
+        monthly_drift = (expected_return - 0.5 * volatility**2) / 12
         monthly_div = config.dividend_yield / 12 if config.include_dividends else 0
         
-        # Generate random returns
+        # Generate random shocks for GBM
         np.random.seed()  # Ensure different results each run
-        random_returns = np.random.normal(
-            monthly_return,
-            monthly_vol,
-            (num_sims, months)
-        )
+        random_shocks = np.random.normal(0, 1, (num_sims, months))
         
-        # Add jump diffusion if enabled
+        # Calculate log returns: (drift + dividend)*dt + vol*sqrt(dt)*Z
+        log_returns = (monthly_drift + monthly_div) + monthly_vol * random_shocks
+        
+        # Add jump diffusion if enabled (in log space)
         if config.include_jump_diffusion:
             jumps = np.random.binomial(1, config.jump_probability, (num_sims, months))
             jump_sizes = np.random.normal(config.jump_mean, config.jump_std, (num_sims, months))
-            random_returns += jumps * jump_sizes
+            log_returns += jumps * jump_sizes
         
-        # Simulate paths
+        # Simulate paths using GBM: S(t+1) = S(t) * exp(log_return)
         for t in range(months):
-            growth = paths[:, t] * (1 + random_returns[:, t] + monthly_div)
-            paths[:, t + 1] = growth + config.monthly_contribution
+            paths[:, t + 1] = paths[:, t] * np.exp(log_returns[:, t]) + config.monthly_contribution
         
         # Calculate statistics at each time point
         percentiles = [5, 10, 25, 50, 75, 90, 95]

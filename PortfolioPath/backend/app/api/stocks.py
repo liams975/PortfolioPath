@@ -72,7 +72,7 @@ async def get_stock_quote(ticker: str):
     return result
 
 
-@router.post("/quotes")
+@router.post("/batch")
 async def get_batch_quotes(request: TickerList):
     """
     Get quotes for multiple tickers at once.

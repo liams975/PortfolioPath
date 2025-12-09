@@ -1,7 +1,7 @@
 """Portfolio API endpoints for CRUD operations."""
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -272,6 +272,7 @@ async def update_portfolio(
         # Delete existing holdings
         for holding in portfolio.holdings:
             await db.delete(holding)
+        await db.flush()  # Ensure deletions are processed before adding new ones
         
         # Create new holdings
         for holding_data in request.holdings:

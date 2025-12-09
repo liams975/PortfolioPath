@@ -9,6 +9,9 @@ import SavedPortfolios from './components/SavedPortfolios';
 import { TickerInput } from './components/TickerInput';
 import { exportToCSV, exportToPDF } from './utils/exportUtils';
 import { savePortfolioLocal, loadPortfoliosLocal, cacheSimulationResults, getCachedSimulation, savePreferences, loadPreferences } from './services/cache';
+import { toast } from './utils/toast';
+import { handleError, retryWithBackoff } from './utils/errorHandler';
+import { checkApiHealth, runSimulation as runBackendSimulation } from './services/api';
 
 /**
  * ============================================================================
@@ -644,10 +647,110 @@ const runAdvancedMonteCarloSimulation = (
 };
 
 // ============================================================================
+// ============================================================================
+// BACKEND RESPONSE TRANSFORMER
+// ============================================================================
+
+/**
+ * Transform backend simulation response to frontend format
+ * Backend returns: { final_values, risk_metrics, sample_paths, yearly_data }
+ * Frontend expects: Array of paths, each path is [{ day, value }, ...]
+ */
+const transformBackendResponse = (backendResponse, timeHorizonDays) => {
+  if (!backendResponse) return null;
+  
+  const initialValue = backendResponse.summary?.initial_investment || 10000;
+  const numSimulations = backendResponse.summary?.num_simulations || 1000;
+  const timeHorizonYears = backendResponse.summary?.time_horizon || Math.ceil(timeHorizonDays / 252);
+  const finalValues = backendResponse.final_values;
+  const yearlyData = backendResponse.yearly_data || [];
+  const samplePaths = backendResponse.sample_paths || [];
+  
+  // Generate paths using yearly_data statistics
+  const paths = [];
+  
+  for (let sim = 0; sim < numSimulations; sim++) {
+    const path = [];
+    
+    // Sample a final value from the distribution
+    const mean = finalValues?.mean || initialValue;
+    const std = finalValues?.std || 0;
+    const min = finalValues?.min || initialValue;
+    const max = finalValues?.max || initialValue;
+    
+    // Use percentile-based sampling for more realistic distribution
+    const percentile = Math.random() * 100;
+    let targetFinalValue;
+    
+    if (finalValues?.percentiles) {
+      // Use actual percentiles if available
+      const p = Math.floor(percentile / 10) * 10;
+      targetFinalValue = finalValues.percentiles[String(p)] || 
+        mean + (Math.random() - 0.5) * std * 2;
+    } else {
+      // Fallback to normal distribution sampling
+      targetFinalValue = Math.max(min, Math.min(max,
+        mean + (Math.random() - 0.5) * std * 4
+      ));
+    }
+    
+    // Generate path using yearly_data for intermediate points
+    for (let day = 0; day <= timeHorizonDays; day++) {
+      const year = day / 252;
+      const yearIndex = Math.floor(year);
+      const nextYearIndex = Math.min(yearIndex + 1, yearlyData.length - 1);
+      const t = year - yearIndex;
+      
+      let value;
+      
+      if (yearlyData.length > 0 && yearIndex < yearlyData.length) {
+        // Use yearly data for interpolation
+        const currentYearData = yearlyData[yearIndex];
+        const nextYearData = yearlyData[nextYearIndex] || currentYearData;
+        
+        // Interpolate between years using mean values
+        const currentMean = currentYearData.mean || initialValue;
+        const nextMean = nextYearData.mean || currentMean;
+        const interpolatedMean = currentMean + (nextMean - currentMean) * t;
+        
+        // Add some variation based on std
+        const currentStd = currentYearData.std || 0;
+        const variation = (Math.random() - 0.5) * currentStd * 0.5;
+        value = interpolatedMean + variation;
+      } else {
+        // Fallback: linear interpolation from initial to final
+        const progress = day / timeHorizonDays;
+        value = initialValue + (targetFinalValue - initialValue) * progress;
+        
+        // Add some random walk variation
+        const dailyVol = std / Math.sqrt(timeHorizonDays);
+        value *= (1 + (Math.random() - 0.5) * dailyVol * 0.1);
+      }
+      
+      // Ensure value is positive and reasonable
+      value = Math.max(0, value);
+      
+      path.push({ day, value });
+    }
+    
+    // Adjust final value to match target
+    if (path.length > 0) {
+      const adjustment = targetFinalValue / path[path.length - 1].value;
+      path.forEach(point => {
+        point.value *= adjustment;
+      });
+    }
+    
+    paths.push(path);
+  }
+  
+  return paths;
+};
+
 // RISK METRICS (same as before with safety checks)
 // ============================================================================
 
-const calculateRiskMetrics = (simulations, initialValue) => {
+const calculateRiskMetrics = (simulations, initialValue, timeHorizonDays = 2520) => {
   if (!simulations || simulations.length === 0) return null;
   
   const finalValues = simulations.map(path => {
@@ -659,14 +762,23 @@ const calculateRiskMetrics = (simulations, initialValue) => {
   
   finalValues.sort((a, b) => a - b);
   
-  const returns = finalValues.map(v => (v - initialValue) / initialValue);
-  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-  const variance = returns.reduce((a, r) => a + Math.pow(r - mean, 2), 0) / returns.length;
+  // Calculate total returns (cumulative over entire period)
+  const totalReturns = finalValues.map(v => (v - initialValue) / initialValue);
+  const meanTotalReturn = totalReturns.reduce((a, b) => a + b, 0) / totalReturns.length;
+  
+  // Convert to annualized return: (1 + total_return)^(1/years) - 1
+  const years = Math.max(timeHorizonDays / 252, 1);
+  const meanAnnualizedReturn = Math.pow(1 + meanTotalReturn, 1 / years) - 1;
+  
+  // For volatility, we need annualized standard deviation of returns
+  const variance = totalReturns.reduce((a, r) => a + Math.pow(r - meanTotalReturn, 2), 0) / totalReturns.length;
   const stdDev = Math.sqrt(variance);
+  // Annualize volatility (approximate)
+  const annualizedVol = stdDev / Math.sqrt(years);
   
   // Kurtosis calculation for tail risk
-  const kurtosis = returns.reduce((a, r) => a + Math.pow(r - mean, 4), 0) / 
-    (returns.length * Math.pow(stdDev, 4));
+  const kurtosis = totalReturns.reduce((a, r) => a + Math.pow(r - meanTotalReturn, 4), 0) / 
+    (totalReturns.length * Math.pow(stdDev, 4));
   
   const var95 = finalValues[Math.floor(finalValues.length * 0.05)] || initialValue;
   const var99 = finalValues[Math.floor(finalValues.length * 0.01)] || initialValue;
@@ -677,13 +789,14 @@ const calculateRiskMetrics = (simulations, initialValue) => {
     : var95;
   
   return {
-    mean: mean * 100,
-    volatility: stdDev * 100,
+    mean: meanAnnualizedReturn * 100, // Annualized expected return %
+    totalReturn: meanTotalReturn * 100, // Total cumulative return %
+    volatility: annualizedVol * 100, // Annualized volatility %
     kurtosis: kurtosis,
     var95: ((var95 - initialValue) / initialValue) * 100,
     var99: ((var99 - initialValue) / initialValue) * 100,
     expectedShortfall: ((expectedShortfall - initialValue) / initialValue) * 100,
-    sharpeRatio: stdDev > 0 ? mean / stdDev : 0,
+    sharpeRatio: annualizedVol > 0 ? meanAnnualizedReturn / annualizedVol : 0,
     percentiles: {
       p10: finalValues[Math.floor(finalValues.length * 0.1)] || initialValue,
       p25: finalValues[Math.floor(finalValues.length * 0.25)] || initialValue,
@@ -746,6 +859,14 @@ const PortfolioPath = () => {
   
   // NEW: Selected preset
   const [selectedPreset, setSelectedPreset] = useState(null);
+  
+  // NEW: Backend connection status
+  const [backendConnected, setBackendConnected] = useState(true);
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
+  
+  // NEW: Loading states for API calls
+  const [isLoadingQuotes, setIsLoadingQuotes] = useState(false);
+  const [quoteErrors, setQuoteErrors] = useState({});
   
   // NEW: Active stress scenario
   const [activeStressScenario, setActiveStressScenario] = useState('normal');
@@ -817,43 +938,153 @@ const PortfolioPath = () => {
     }
   };
 
-  const runSimulation = () => {
+  // Check backend connection status
+  useEffect(() => {
+    const checkConnection = async () => {
+      setIsCheckingConnection(true);
+      try {
+        const connected = await checkApiHealth();
+        setBackendConnected(connected);
+        if (!connected && backendConnected) {
+          toast.warning('Backend connection lost. Some features may not work.');
+        } else if (connected && !backendConnected) {
+          toast.success('Backend connection restored.');
+        }
+      } catch (error) {
+        setBackendConnected(false);
+        if (backendConnected) {
+          toast.warning('Backend connection lost. Some features may not work.');
+        }
+      } finally {
+        setIsCheckingConnection(false);
+      }
+    };
+    
+    // Check immediately
+    checkConnection();
+    
+    // Check every 30 seconds
+    const interval = setInterval(checkConnection, 30000);
+    
+    return () => clearInterval(interval);
+  }, [backendConnected]);
+
+  const runSimulation = async () => {
     if (Math.abs(totalWeight - 1) > 0.01) {
-      alert('Portfolio weights must sum to 100%');
+      toast.error(`Portfolio weights must sum to 100% (currently ${(totalWeight * 100).toFixed(1)}%)`);
       return;
     }
     
     setIsSimulating(true);
     setSimulationProgress(0);
     
-    // Use setTimeout to allow UI to update before heavy computation
-    setTimeout(() => {
-      const progressInterval = setInterval(() => {
+    // Progress simulation
+    const progressInterval = setInterval(() => {
+      setSimulationProgress(prev => Math.min(prev + 90, 90)); // Cap at 90% until backend responds
+    }, 100);
+    
+    try {
+      // Try backend API first
+      if (backendConnected) {
+        try {
+          // Convert portfolio format: { ticker, weight } -> { ticker, allocation }
+          const holdings = portfolio.map(p => ({
+            ticker: p.ticker.toUpperCase(),
+            allocation: p.weight * 100 // Convert 0-1 to 0-100
+          }));
+          
+          // Convert time horizon from days to years (backend expects years)
+          const timeHorizonYears = Math.ceil(timeHorizon / 252);
+          
+          // Call backend API
+          const backendResponse = await runBackendSimulation({
+            holdings,
+            initialInvestment: initialValue,
+            monthlyContribution: 0, // TODO: Add monthly contribution support
+            timeHorizon: timeHorizonYears,
+            numSimulations: numSimulations,
+            includeDividends: true,
+            includeJumpDiffusion: advancedOptions.useJumpDiffusion || false,
+            jumpProbability: 0.05,
+            jumpMean: -0.1,
+            jumpStd: 0.15
+          });
+          
+          clearInterval(progressInterval);
+          setSimulationProgress(95);
+          
+          // Transform backend response to frontend format
+          const transformedResults = transformBackendResponse(backendResponse, timeHorizon);
+          
+          if (transformedResults) {
+            setSimulationProgress(100);
+            setSimulationResults(transformedResults);
+            
+            // Cache results
+            cacheSimulationResults(getCurrentPortfolioData(), transformedResults, calculateRiskMetrics(transformedResults, initialValue, timeHorizon));
+            
+            // Run comparison simulation if in comparison mode
+            if (comparisonMode && Math.abs(totalComparisonWeight - 1) <= 0.01) {
+              try {
+                const compHoldings = comparisonPortfolio.map(p => ({
+                  ticker: p.ticker.toUpperCase(),
+                  allocation: p.weight * 100
+                }));
+                
+                const compBackendResponse = await runBackendSimulation({
+                  holdings: compHoldings,
+                  initialInvestment: initialValue,
+                  monthlyContribution: 0,
+                  timeHorizon: timeHorizonYears,
+                  numSimulations: numSimulations,
+                  includeDividends: true,
+                  includeJumpDiffusion: advancedOptions.useJumpDiffusion || false
+                });
+                
+                const compTransformed = transformBackendResponse(compBackendResponse, timeHorizon);
+                if (compTransformed) {
+                  setComparisonResults(compTransformed);
+                }
+              } catch (compError) {
+                console.warn('Comparison simulation failed, using client-side fallback:', compError);
+                // Fallback to client-side for comparison
+                const compResults = runAdvancedMonteCarloSimulation(
+                  comparisonPortfolio,
+                  initialValue,
+                  timeHorizon,
+                  numSimulations,
+                  { ...advancedOptions, scenarios }
+                );
+                setComparisonResults(compResults);
+              }
+            } else {
+              setComparisonResults(null);
+            }
+            
+            setIsSimulating(false);
+            setView('results');
+            toast.success('Simulation completed using real market data');
+            return;
+          }
+        } catch (backendError) {
+          console.warn('Backend simulation failed, falling back to client-side:', backendError);
+          handleError(backendError, 'Backend simulation');
+          // Fall through to client-side fallback
+        }
+      }
+      
+      // Fallback to client-side simulation
+      clearInterval(progressInterval);
+      toast.warning('Using client-side simulation (backend unavailable)');
+      
+      const progressInterval2 = setInterval(() => {
         setSimulationProgress(prev => Math.min(prev + 5, 95));
       }, 100);
       
-      const results = runAdvancedMonteCarloSimulation(
-        portfolio,
-        initialValue,
-        timeHorizon,
-        numSimulations,
-        {
-          ...advancedOptions,
-          scenarios
-        }
-      );
-      
-      clearInterval(progressInterval);
-      setSimulationProgress(100);
-      setSimulationResults(results);
-      
-      // Cache results
-      cacheSimulationResults(getCurrentPortfolioData(), results, calculateRiskMetrics(results, initialValue));
-      
-      // Run comparison simulation if in comparison mode
-      if (comparisonMode && Math.abs(totalComparisonWeight - 1) <= 0.01) {
-        const compResults = runAdvancedMonteCarloSimulation(
-          comparisonPortfolio,
+      // Use setTimeout to allow UI to update before heavy computation
+      setTimeout(() => {
+        const results = runAdvancedMonteCarloSimulation(
+          portfolio,
           initialValue,
           timeHorizon,
           numSimulations,
@@ -862,14 +1093,41 @@ const PortfolioPath = () => {
             scenarios
           }
         );
-        setComparisonResults(compResults);
-      } else {
-        setComparisonResults(null);
-      }
+        
+        clearInterval(progressInterval2);
+        setSimulationProgress(100);
+        setSimulationResults(results);
+        
+        // Cache results
+        cacheSimulationResults(getCurrentPortfolioData(), results, calculateRiskMetrics(results, initialValue, timeHorizon));
+        
+        // Run comparison simulation if in comparison mode
+        if (comparisonMode && Math.abs(totalComparisonWeight - 1) <= 0.01) {
+          const compResults = runAdvancedMonteCarloSimulation(
+            comparisonPortfolio,
+            initialValue,
+            timeHorizon,
+            numSimulations,
+            {
+              ...advancedOptions,
+              scenarios
+            }
+          );
+          setComparisonResults(compResults);
+        } else {
+          setComparisonResults(null);
+        }
+        
+        setIsSimulating(false);
+        setView('results');
+      }, 50);
       
+    } catch (error) {
+      clearInterval(progressInterval);
       setIsSimulating(false);
-      setView('results');
-    }, 50);
+      handleError(error, 'Simulation');
+      toast.error('Simulation failed. Please try again.');
+    }
   };
 
   const loadPortfolio = (savedData) => {
@@ -892,14 +1150,14 @@ const PortfolioPath = () => {
 
   const riskMetrics = useMemo(() => {
     if (!simulationResults) return null;
-    return calculateRiskMetrics(simulationResults, initialValue);
-  }, [simulationResults, initialValue]);
+    return calculateRiskMetrics(simulationResults, initialValue, timeHorizon);
+  }, [simulationResults, initialValue, timeHorizon]);
   
   // Comparison risk metrics
   const comparisonRiskMetrics = useMemo(() => {
     if (!comparisonResults) return null;
-    return calculateRiskMetrics(comparisonResults, initialValue);
-  }, [comparisonResults, initialValue]);
+    return calculateRiskMetrics(comparisonResults, initialValue, timeHorizon);
+  }, [comparisonResults, initialValue, timeHorizon]);
 
   // Goal probability calculation
   const goalProbability = useMemo(() => {
@@ -1154,7 +1412,38 @@ const PortfolioPath = () => {
         key="input"
         className={`min-h-screen ${colors.bg} ${colors.text} p-6`}
       >
-        <div className="max-w-6xl mx-auto">
+        {/* Backend Connection Status Banner */}
+        {!backendConnected && (
+          <div className="fixed top-0 left-0 right-0 z-50 bg-red-500 text-white px-4 py-2 flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5" />
+              <span className="text-sm font-medium">Backend connection lost. Some features may not work.</span>
+            </div>
+            <button
+              onClick={async () => {
+                setIsCheckingConnection(true);
+                try {
+                  const connected = await checkApiHealth();
+                  setBackendConnected(connected);
+                  if (connected) {
+                    toast.success('Connection restored!');
+                  } else {
+                    toast.error('Still unable to connect. Please check if the backend server is running.');
+                  }
+                } catch (error) {
+                  toast.error('Connection check failed.');
+                } finally {
+                  setIsCheckingConnection(false);
+                }
+              }}
+              disabled={isCheckingConnection}
+              className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium disabled:opacity-50"
+            >
+              {isCheckingConnection ? 'Checking...' : 'Retry'}
+            </button>
+          </div>
+        )}
+        <div className="max-w-6xl mx-auto" style={{ marginTop: !backendConnected ? '3rem' : '0' }}>
           {/* Header with Auth and Theme Toggle */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">

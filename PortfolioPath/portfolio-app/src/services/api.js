@@ -126,33 +126,70 @@ export const isAuthenticated = () => !!authToken;
 // ============================================================================
 
 export const fetchStockQuote = async (ticker) => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/quote/${ticker}`, {
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  if (!response.ok) throw new Error(`Failed to fetch ${ticker}`);
-  const data = await response.json();
-  return { ...data, timestamp: Date.now() };
+  try {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/quote/${ticker}`, {
+      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+    });
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(`Ticker "${ticker}" not found. Please check the symbol.`);
+      }
+      throw new Error(`Failed to fetch ${ticker}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return { ...data, timestamp: Date.now() };
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out while fetching ${ticker}. Please try again.`);
+    }
+    throw error;
+  }
 };
 
 export const fetchBatchQuotes = async (tickers) => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(tickers),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  if (!response.ok) throw new Error('Failed to fetch quotes');
-  const data = await response.json();
-  return data.quotes || {};
+  try {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers: tickers }),
+      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+    });
+    if (!response.ok) {
+      if (response.status === 400) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || 'Invalid request. Please check your ticker symbols.');
+      }
+      throw new Error(`Failed to fetch quotes: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.quotes || {};
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out while fetching quotes. Please try again.');
+    }
+    throw error;
+  }
 };
 
 export const fetchHistoricalData = async (ticker, period = '5y') => {
-  const response = await fetch(
-    `${API_CONFIG.BASE_URL}/api/stocks/historical/${ticker}?period=${period}`,
-    { signal: AbortSignal.timeout(API_CONFIG.TIMEOUT) }
-  );
-  if (!response.ok) throw new Error(`Failed to fetch historical data for ${ticker}`);
-  return response.json();
+  try {
+    const response = await fetch(
+      `${API_CONFIG.BASE_URL}/api/stocks/historical/${ticker}?period=${period}`,
+      { signal: AbortSignal.timeout(API_CONFIG.TIMEOUT) }
+    );
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(`Historical data not available for "${ticker}".`);
+      }
+      throw new Error(`Failed to fetch historical data for ${ticker}: ${response.statusText}`);
+    }
+    return response.json();
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out while fetching historical data for ${ticker}. Please try again.`);
+    }
+    throw error;
+  }
 };
 
 export const fetchAssetParameters = async (ticker) => {
@@ -200,7 +237,7 @@ export const fetchCorrelationMatrix = async (tickers) => {
     const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/correlation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(tickers),
+      body: JSON.stringify({ tickers: tickers, period: '5y' }),
       signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
     });
     if (!response.ok) throw new Error('Failed to fetch correlation matrix');
@@ -258,7 +295,7 @@ export const runSimulation = async ({
   });
   
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json().catch(() => ({ detail: 'Simulation failed' }));
     throw new Error(error.detail || 'Simulation failed');
   }
   
