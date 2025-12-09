@@ -20,6 +20,7 @@ from app.api.stocks import router as stocks_router
 from app.api.simulation import router as simulation_router
 from app.api.auth import router as auth_router
 from app.api.portfolios import router as portfolios_router
+from app.api.payments import router as payments_router
 
 
 @asynccontextmanager
@@ -95,6 +96,7 @@ app.include_router(stocks_router)
 app.include_router(simulation_router)
 app.include_router(auth_router)
 app.include_router(portfolios_router)
+app.include_router(payments_router)
 
 
 @app.get("/")

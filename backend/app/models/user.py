@@ -20,6 +20,11 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     
+    # Premium status (one-time payment)
+    is_premium = Column(Boolean, default=False)
+    payment_status = Column(String(50), nullable=True)  # 'pending', 'completed', 'failed'
+    stripe_customer_id = Column(String(255), nullable=True)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -29,4 +34,4 @@ class User(Base):
     portfolios = relationship("Portfolio", back_populates="owner", cascade="all, delete-orphan")
     
     def __repr__(self):
-        return f"<User(id={self.id}, username={self.username}, email={self.email})>"
+        return f"<User(id={self.id}, username={self.username}, email={self.email}, premium={self.is_premium})>"

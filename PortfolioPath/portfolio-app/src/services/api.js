@@ -498,6 +498,75 @@ export const duplicatePortfolio = async (portfolioId, newName = null) => {
 };
 
 // ============================================================================
+// PAYMENT API
+// ============================================================================
+
+export const getPaymentConfig = async () => {
+  try {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/config`, {
+      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+    });
+    
+    if (!response.ok) {
+      if (response.status === 503) {
+        return { available: false, reason: 'Payment system not configured' };
+      }
+      throw new Error('Failed to fetch payment config');
+    }
+    
+    const data = await response.json();
+    return { available: true, ...data };
+  } catch (error) {
+    console.warn('Payment config not available:', error);
+    return { available: false, reason: error.message };
+  }
+};
+
+export const createCheckoutSession = async (priceId) => {
+  const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/create-checkout-session`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ price_id: priceId }),
+    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to create checkout session');
+  }
+  
+  return response.json();
+};
+
+export const getPaymentStatus = async () => {
+  const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/status`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch payment status');
+  }
+  
+  return response.json();
+};
+
+export const verifyPaymentSession = async (sessionId) => {
+  const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/verify-session?session_id=${sessionId}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to verify payment');
+  }
+  
+  return response.json();
+};
+
+// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
@@ -536,6 +605,9 @@ export default {
   
   // Portfolios
   savePortfolio, loadPortfolios, getPortfolio, updatePortfolio, deletePortfolio, duplicatePortfolio,
+  
+  // Payments
+  getPaymentConfig, createCheckoutSession, getPaymentStatus, verifyPaymentSession,
   
   // Utility
   checkApiHealth, getApiConfig
