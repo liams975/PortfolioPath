@@ -1,11 +1,16 @@
-# PortfolioPath Backend
-# This file tells Railway/Nixpacks how to build
+# PortfolioPath Backend - Railway/Nixpacks Config
+
+providers = ["python"]
 
 [phases.setup]
-nixPkgs = ["python311", "gcc"]
+nixPkgs = ["python311", "python311Packages.pip"]
 
 [phases.install]
-cmds = ["pip install -r backend/requirements.txt"]
+dependsOn = ["setup"]
+cmds = ["python -m pip install --upgrade pip", "python -m pip install -r backend/requirements.txt"]
 
 [start]
 cmd = "cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+
+[variables]
+PYTHONUNBUFFERED = "1"
