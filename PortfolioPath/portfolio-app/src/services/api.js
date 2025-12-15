@@ -171,14 +171,10 @@ export const fetchBatchQuotes = async (tickers) => {
   }
 };
 
-export const fetchHistoricalData = async (ticker, period = '5y', targetDays = null) => {
+export const fetchHistoricalData = async (ticker, period = '5y') => {
   try {
-    let url = `${API_CONFIG.BASE_URL}/api/stocks/historical/${ticker}?period=${period}`;
-    if (targetDays) {
-      url += `&target_days=${targetDays}`;
-    }
     const response = await fetch(
-      url,
+      `${API_CONFIG.BASE_URL}/api/stocks/historical/${ticker}?period=${period}`,
       { signal: AbortSignal.timeout(API_CONFIG.TIMEOUT) }
     );
     if (!response.ok) {
@@ -196,18 +192,23 @@ export const fetchHistoricalData = async (ticker, period = '5y', targetDays = nu
   }
 };
 
-export const fetchAssetParameters = async (ticker, targetDays = 252) => {
+export const fetchAssetParameters = async (ticker) => {
   try {
-    const data = await fetchHistoricalData(ticker, 'max', targetDays);
+    const data = await fetchHistoricalData(ticker, '5y');
+    // Backend returns ANNUALIZED returns/vol, but we store DAILY values
+    // to match the static assetDatabase format (which uses daily returns)
+    // Convert: annualized_return / 252 = daily_return
+    // Convert: annualized_vol / sqrt(252) = daily_vol
+    const annualizedMean = data.statistics?.mean_return || 0.0756; // ~7.56% annual default
+    const annualizedVol = data.statistics?.volatility || 0.15; // ~15% annual vol default
+    
     return { 
-      mean: data.statistics?.mean_return || 0.0003, 
-      vol: data.statistics?.volatility || 0.015, 
+      mean: annualizedMean / 252, // Convert to daily return
+      vol: annualizedVol / Math.sqrt(252), // Convert to daily volatility
       name: data.ticker,
       sharpeRatio: data.statistics?.sharpe_ratio || 0,
       maxDrawdown: data.statistics?.max_drawdown || 0,
-      totalReturn: data.statistics?.total_return || 0,
-      dataPoints: data.statistics?.data_points || 0,
-      weighted: data.statistics?.weighted || false
+      totalReturn: data.statistics?.total_return || 0
     };
   } catch {
     return { mean: 0.0003, vol: 0.015, name: ticker.toUpperCase() };
@@ -498,9 +499,12 @@ export const duplicatePortfolio = async (portfolioId, newName = null) => {
 };
 
 // ============================================================================
-// PAYMENT API
+// PAYMENT API FUNCTIONS
 // ============================================================================
 
+/**
+ * Get payment configuration (Stripe publishable key, products)
+ */
 export const getPaymentConfig = async () => {
   try {
     const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/config`, {
@@ -509,49 +513,76 @@ export const getPaymentConfig = async () => {
     
     if (!response.ok) {
       if (response.status === 503) {
-        return { available: false, reason: 'Payment system not configured' };
+        return { available: false, products: [] };
       }
-      throw new Error('Failed to fetch payment config');
+      throw new Error('Failed to load payment configuration');
     }
     
-    const data = await response.json();
-    return { available: true, ...data };
+    const config = await response.json();
+    return { 
+      available: !!config.publishable_key,
+      ...config 
+    };
   } catch (error) {
-    console.warn('Payment config not available:', error);
-    return { available: false, reason: error.message };
+    console.error('Payment config error:', error);
+    return { available: false, products: [] };
   }
 };
 
+/**
+ * Create a Stripe checkout session
+ * @param {string} priceId - Stripe Price ID
+ */
 export const createCheckoutSession = async (priceId) => {
+  if (!authToken) throw new Error('Please sign in to purchase');
+  
   const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/create-checkout-session`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: {
+      ...authHeaders(),
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify({ price_id: priceId }),
     signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
   });
   
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || 'Failed to create checkout session');
   }
   
   return response.json();
 };
 
+/**
+ * Get user's payment/premium status
+ */
 export const getPaymentStatus = async () => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/status`, {
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
+  if (!authToken) return { is_premium: false };
   
-  if (!response.ok) {
-    throw new Error('Failed to fetch payment status');
+  try {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/status`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+    });
+    
+    if (!response.ok) {
+      return { is_premium: false };
+    }
+    
+    return response.json();
+  } catch {
+    return { is_premium: false };
   }
-  
-  return response.json();
 };
 
+/**
+ * Verify a checkout session after payment redirect
+ * @param {string} sessionId - Stripe Session ID from URL
+ */
 export const verifyPaymentSession = async (sessionId) => {
+  if (!authToken) throw new Error('Please sign in to verify payment');
+  
   const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/verify-session?session_id=${sessionId}`, {
     method: 'POST',
     headers: authHeaders(),
@@ -559,7 +590,7 @@ export const verifyPaymentSession = async (sessionId) => {
   });
   
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || 'Failed to verify payment');
   }
   
@@ -572,7 +603,7 @@ export const verifyPaymentSession = async (sessionId) => {
 
 export const checkApiHealth = async () => {
   try {
-    const response = await fetch(`${API_CONFIG.BASE_URL}/health`, {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/health`, {
       signal: AbortSignal.timeout(5000)
     });
     return response.ok;

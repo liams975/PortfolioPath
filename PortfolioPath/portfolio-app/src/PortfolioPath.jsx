@@ -1,826 +1,54 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart, PieChart, Pie, Cell, ScatterChart, Scatter, ReferenceLine } from 'recharts';
-import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, FileText, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, CheckCircle, Package, RefreshCw } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
+import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package, RefreshCw, Crown, Star } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useTheme } from './context/ThemeContext';
+import { usePremium, PRO_FEATURES, ProFeatureGate } from './context/PremiumContext';
 import AuthModal from './components/AuthModal';
+import PaymentModal from './components/PaymentModal';
+import OnboardingTutorial, { useTutorial } from './components/OnboardingTutorial';
 import SavedPortfolios from './components/SavedPortfolios';
 import { TickerInput } from './components/TickerInput';
 import { exportToCSV, exportToPDF } from './utils/exportUtils';
-import { savePortfolioLocal, loadPortfoliosLocal, cacheSimulationResults, getCachedSimulation, savePreferences, loadPreferences } from './services/cache';
+import { cacheSimulationResults } from './services/cache';
 import { toast } from './utils/toast';
-import { handleError, retryWithBackoff } from './utils/errorHandler';
-import { checkApiHealth, runSimulation as runBackendSimulation, fetchAssetParameters } from './services/api';
+import { handleError } from './utils/errorHandler';
+import { checkApiHealth, runSimulation as runBackendSimulation } from './services/api';
 
-/**
- * ============================================================================
- * PORTFOLIOPATH PRO - ADVANCED MONTE CARLO PORTFOLIO SIMULATOR
- * ============================================================================
- * 
- * This application uses Monte Carlo simulation to project potential future 
- * outcomes for investment portfolios. It runs thousands of "what-if" scenarios
- * to show you the range of possible returns.
- * 
- * KEY CONCEPTS:
- * 
- * 1. TIME HORIZON (Default: 252 days)
- *    - NOT based on historical data from a specific timeframe
- *    - Forward-looking synthetic scenarios
- *    - 252 trading days ≈ 1 year (excludes weekends/holidays)
- *    - You can adjust to model different investment periods
- * 
- * 2. MONTE CARLO SIMULATION
- *    - Runs 1,000+ simulations of possible futures
- *    - Each simulation generates daily returns based on:
- *      • Statistical parameters (mean return, volatility)
- *      • Correlation between assets
- *      • Random market events
- *    - Produces a distribution of outcomes (best, worst, most likely)
- * 
- * 3. ASSET PARAMETERS
- *    - Each ticker has pre-defined statistical properties:
- *      • Mean: Average daily return (e.g., 0.0003 = 0.03% daily, ~7.5% annually)
- *      • Volatility: Daily price fluctuation (e.g., 0.01 = 1% daily, ~16% annually)
- *    - These are TYPICAL long-term averages, not live market data
- * 
- * 4. ADVANCED FEATURES (Optional):
- *    
- *    a) CORRELATION MATRIX (Cholesky Decomposition)
- *       - Models how assets move together
- *       - Example: When S&P 500 falls 5%, tech stocks likely fall too
- *       - Bonds often move opposite to stocks
- *    
- *    b) FAT-TAILED DISTRIBUTIONS (Student-t)
- *       - Real markets have more extreme events than normal distribution
- *       - Captures "black swan" events (crashes, booms)
- *    
- *    c) GARCH(1,1) VOLATILITY
- *       - Volatility clustering: Wild markets stay wild, calm stays calm
- *       - After a market crash, expect continued high volatility
- *    
- *    d) REGIME SWITCHING (Bull/Bear Markets)
- *       - Markets alternate between rising (bull) and falling (bear) phases
- *       - Bull: Positive returns, lower volatility
- *       - Bear: Negative returns, higher volatility
- *       - Randomly transitions between states based on probabilities
- * 
- * 5. SCENARIO TESTING
- *    - Recession: -30% to expected returns
- *    - Volatility Spike: +50% market swings (crisis simulation)
- *    - Bull Market: +30% to expected returns
- * 
- * 6. RISK METRICS EXPLAINED
- *    - VaR (95%): "5% chance of losing at least this much"
- *    - Expected Shortfall: "Average loss in worst 5% of cases"
- *    - Kurtosis: Measures tail risk (>3 = more extreme events)
- *    - Sharpe Ratio: Return per unit of risk (higher = better)
- * 
- * IMPORTANT NOTES:
- * - This is a SIMULATION, not a prediction
- * - No transaction costs or taxes included
- * - Assumes daily compounding of returns
- * - Asset parameters are simplified (not live market data)
- * 
- * See MODEL_EXPLANATION.md for detailed technical documentation
- * ============================================================================
- */
+// Import from modularized files
+import {
+  PRESET_PORTFOLIOS,
+  STRESS_SCENARIOS,
+  DEFAULT_PORTFOLIO,
+  DEFAULT_COMPARISON_PORTFOLIO,
+  DEFAULT_ADVANCED_OPTIONS,
+  assetDatabase,
+  generateCorrelationMatrix
+} from './constants/portfolioConstants';
 
-// ============================================================================
-// ADVANCED MATHEMATICAL UTILITIES
-// ============================================================================
+// Real market data hook
+import { useMarketData, useRealTimeQuotes, getAssetParams } from './hooks/useMarketData';
 
-// Box-Muller transform for normal distribution
-// Converts uniform random numbers into normally distributed numbers (bell curve)
-// Used for basic market return modeling
-const randomNormal = (mean = 0, stdDev = 1) => {
-  const u1 = Math.random();
-  const u2 = Math.random();
-  const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-  return z0 * stdDev + mean;
-};
+import {
+  runAdvancedMonteCarloSimulation,
+  transformBackendResponse,
+  calculateRiskMetrics,
+  calculateGoalProbability,
+  calculateDrawdownMetrics
+} from './utils/simulation';
 
-// Student-t distribution for fat tails (using Gamma approximation)
-// Generates returns with "fat tails" - more extreme events than normal distribution
-// This better matches real market behavior where crashes and booms are more common
-const randomStudentT = (degreesOfFreedom = 5) => {
-  const df = degreesOfFreedom;
-  const z = randomNormal();
-  const chi2 = Array.from({ length: df }, () => Math.pow(randomNormal(), 2))
-    .reduce((a, b) => a + b, 0);
-  return z * Math.sqrt(df / chi2);
-};
-
-// Cholesky decomposition for correlation matrix
-// Matrix math technique to ensure assets move together realistically
-// Example: When SPY rises, QQQ tends to rise too (they're correlated)
-const choleskyDecomposition = (matrix) => {
-  const n = matrix.length;
-  const L = Array(n).fill(0).map(() => Array(n).fill(0));
-  
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j <= i; j++) {
-      let sum = 0;
-      for (let k = 0; k < j; k++) {
-        sum += L[i][k] * L[j][k];
-      }
-      
-      if (i === j) {
-        L[i][j] = Math.sqrt(Math.max(matrix[i][i] - sum, 0.0001));
-      } else {
-        L[i][j] = (matrix[i][j] - sum) / L[j][j];
-      }
-    }
-  }
-  return L;
-};
-
-// Generate correlated random variables
-const generateCorrelatedReturns = (choleskyMatrix, useFatTails = false, df = 5) => {
-  const n = choleskyMatrix.length;
-  const uncorrelated = useFatTails 
-    ? Array.from({ length: n }, () => randomStudentT(df))
-    : Array.from({ length: n }, () => randomNormal());
-  
-  const correlated = Array(n).fill(0);
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j <= i; j++) {
-      correlated[i] += choleskyMatrix[i][j] * uncorrelated[j];
-    }
-  }
-  return correlated;
-};
-
-// ============================================================================
-// GARCH(1,1) VOLATILITY MODEL
-// ============================================================================
-
-class GARCHModel {
-  constructor(omega = 0.000001, alpha = 0.1, beta = 0.85) {
-    this.omega = omega;
-    this.alpha = alpha;
-    this.beta = beta;
-    this.currentVariance = 0.0001;
-  }
-  
-  update(returnShock) {
-    this.currentVariance = this.omega + 
-      this.alpha * Math.pow(returnShock, 2) + 
-      this.beta * this.currentVariance;
-    return Math.sqrt(this.currentVariance);
-  }
-  
-  getVolatility() {
-    return Math.sqrt(this.currentVariance);
-  }
-}
-
-// ============================================================================
-// REGIME SWITCHING MODEL (2-STATE Markov Chain)
-// ============================================================================
-
-class RegimeSwitchingModel {
-  constructor() {
-    // Bull and Bear regime parameters
-    this.regimes = {
-      bull: { mean: 0.0006, vol: 0.01, label: 'Bull Market' },
-      bear: { mean: -0.0003, vol: 0.025, label: 'Bear Market' }
-    };
-    
-    // Transition probabilities
-    this.transitionMatrix = {
-      bull: { bull: 0.95, bear: 0.05 },
-      bear: { bull: 0.10, bear: 0.90 }
-    };
-    
-    this.currentRegime = 'bull';
-  }
-  
-  transition() {
-    const rand = Math.random();
-    const probs = this.transitionMatrix[this.currentRegime];
-    
-    if (rand < probs.bear) {
-      this.currentRegime = 'bear';
-    } else {
-      this.currentRegime = 'bull';
-    }
-    
-    return this.currentRegime;
-  }
-  
-  getParameters() {
-    return this.regimes[this.currentRegime];
-  }
-  
-  getCurrentRegime() {
-    return this.currentRegime;
-  }
-}
-
-// ============================================================================
-// ENHANCED ASSET DATA WITH CORRELATIONS
-// ============================================================================
-
-const assetDatabase = {
-  'SPY': { mean: 0.0003, vol: 0.01, name: 'S&P 500 ETF' },
-  'QQQ': { mean: 0.0004, vol: 0.015, name: 'Nasdaq 100 ETF' },
-  'AAPL': { mean: 0.0005, vol: 0.018, name: 'Apple Inc.' },
-  'MSFT': { mean: 0.0004, vol: 0.016, name: 'Microsoft Corp.' },
-  'GOOGL': { mean: 0.0004, vol: 0.017, name: 'Alphabet Inc.' },
-  'TSLA': { mean: 0.0006, vol: 0.035, name: 'Tesla Inc.' },
-  'VTI': { mean: 0.0003, vol: 0.01, name: 'Total Stock Market ETF' },
-  'BND': { mean: 0.0001, vol: 0.004, name: 'Bond Index ETF' },
-  'GLD': { mean: 0.0002, vol: 0.012, name: 'Gold ETF' },
-  'IWM': { mean: 0.0003, vol: 0.016, name: 'Small Cap ETF' },
-};
-
-// ============================================================================
-// PRESET PORTFOLIO TEMPLATES
-// ============================================================================
-
-const PRESET_PORTFOLIOS = {
-  'classic_60_40': {
-    name: 'Classic 60/40',
-    description: 'Traditional balanced portfolio',
-    portfolio: [
-      { ticker: 'SPY', weight: 0.6 },
-      { ticker: 'BND', weight: 0.4 }
-    ],
-    risk: 'Moderate'
-  },
-  'aggressive_growth': {
-    name: 'Aggressive Growth',
-    description: 'High risk, high reward tech focus',
-    portfolio: [
-      { ticker: 'QQQ', weight: 0.5 },
-      { ticker: 'AAPL', weight: 0.2 },
-      { ticker: 'TSLA', weight: 0.15 },
-      { ticker: 'NVDA', weight: 0.15 }
-    ],
-    risk: 'High'
-  },
-  'conservative': {
-    name: 'Conservative',
-    description: 'Capital preservation focus',
-    portfolio: [
-      { ticker: 'BND', weight: 0.5 },
-      { ticker: 'SPY', weight: 0.3 },
-      { ticker: 'GLD', weight: 0.2 }
-    ],
-    risk: 'Low'
-  },
-  'all_weather': {
-    name: 'All Weather',
-    description: 'Ray Dalio inspired diversification',
-    portfolio: [
-      { ticker: 'SPY', weight: 0.3 },
-      { ticker: 'TLT', weight: 0.4 },
-      { ticker: 'GLD', weight: 0.15 },
-      { ticker: 'VWO', weight: 0.15 }
-    ],
-    risk: 'Moderate'
-  },
-  'dividend_income': {
-    name: 'Dividend Income',
-    description: 'Stable dividend-paying stocks',
-    portfolio: [
-      { ticker: 'VTI', weight: 0.4 },
-      { ticker: 'JNJ', weight: 0.2 },
-      { ticker: 'PG', weight: 0.2 },
-      { ticker: 'BND', weight: 0.2 }
-    ],
-    risk: 'Low-Moderate'
-  },
-  'tech_heavy': {
-    name: 'Tech Heavy',
-    description: 'Technology sector concentration',
-    portfolio: [
-      { ticker: 'QQQ', weight: 0.4 },
-      { ticker: 'MSFT', weight: 0.2 },
-      { ticker: 'GOOGL', weight: 0.2 },
-      { ticker: 'META', weight: 0.2 }
-    ],
-    risk: 'High'
-  },
-  'global_diversified': {
-    name: 'Global Diversified',
-    description: 'International exposure',
-    portfolio: [
-      { ticker: 'VTI', weight: 0.4 },
-      { ticker: 'VEA', weight: 0.3 },
-      { ticker: 'VWO', weight: 0.2 },
-      { ticker: 'BND', weight: 0.1 }
-    ],
-    risk: 'Moderate'
-  }
-};
-
-// ============================================================================
-// STRESS TEST SCENARIOS
-// ============================================================================
-
-const STRESS_SCENARIOS = {
-  '2008_crash': {
-    name: '2008 Financial Crisis',
-    description: 'Simulate market conditions during the 2008 crash',
-    modifier: { recession: true },
-    icon: '📉'
-  },
-  'covid_crash': {
-    name: 'COVID-19 Crash',
-    description: 'March 2020 style rapid drawdown',
-    modifier: { volatilitySpike: true, recession: true },
-    icon: '🦠'
-  },
-  'bull_run': {
-    name: '2021 Bull Market',
-    description: 'Post-pandemic recovery rally',
-    modifier: { bullMarket: true },
-    icon: '🐂'
-  },
-  'stagflation': {
-    name: 'Stagflation',
-    description: '1970s style inflation + stagnation',
-    modifier: { recession: true, volatilitySpike: true },
-    icon: '📊'
-  },
-  'normal': {
-    name: 'Normal Conditions',
-    description: 'Typical market environment',
-    modifier: {},
-    icon: '📈'
-  }
-};
-
-// ============================================================================
-// GOAL PROBABILITY CALCULATOR
-// ============================================================================
-
-const calculateGoalProbability = (simulations, targetValue) => {
-  if (!simulations || simulations.length === 0) return null;
-  
-  const finalValues = simulations.map(path => {
-    const lastPoint = path[path.length - 1];
-    return lastPoint ? lastPoint.value : 0;
-  });
-  
-  const successCount = finalValues.filter(v => v >= targetValue).length;
-  const probability = (successCount / finalValues.length) * 100;
-  
-  // Find the time when probability first exceeds 50%
-  let medianCrossingDay = null;
-  const days = simulations[0]?.length || 0;
-  
-  for (let day = 0; day < days; day++) {
-    const valuesAtDay = simulations.map(path => path[day]?.value || 0);
-    const aboveTarget = valuesAtDay.filter(v => v >= targetValue).length;
-    if (aboveTarget / simulations.length >= 0.5) {
-      medianCrossingDay = day;
-      break;
-    }
-  }
-  
-  return {
-    probability: probability.toFixed(1),
-    successCount,
-    totalSimulations: simulations.length,
-    medianCrossingDay
-  };
-};
-
-// ============================================================================
-// DRAWDOWN CALCULATOR
-// ============================================================================
-
-const calculateDrawdownMetrics = (simulations) => {
-  if (!simulations || simulations.length === 0) return null;
-  
-  const drawdownData = [];
-  const maxDrawdowns = [];
-  
-  // Calculate drawdown for each simulation
-  simulations.forEach(path => {
-    let peak = path[0]?.value || 0;
-    let maxDrawdown = 0;
-    
-    path.forEach(point => {
-      if (point.value > peak) peak = point.value;
-      const drawdown = (peak - point.value) / peak;
-      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-    });
-    
-    maxDrawdowns.push(maxDrawdown * 100);
-  });
-  
-  maxDrawdowns.sort((a, b) => a - b);
-  
-  // Calculate average drawdown path
-  const days = simulations[0]?.length || 0;
-  const step = Math.max(1, Math.ceil(days / 50));
-  
-  for (let day = 0; day < days; day += step) {
-    const drawdownsAtDay = simulations.map(path => {
-      let peak = path[0]?.value || 0;
-      for (let d = 0; d <= day; d++) {
-        if (path[d]?.value > peak) peak = path[d].value;
-      }
-      return path[day] ? ((peak - path[day].value) / peak) * 100 : 0;
-    }).sort((a, b) => a - b);
-    
-    drawdownData.push({
-      day,
-      p10: drawdownsAtDay[Math.floor(drawdownsAtDay.length * 0.1)] || 0,
-      median: drawdownsAtDay[Math.floor(drawdownsAtDay.length * 0.5)] || 0,
-      p90: drawdownsAtDay[Math.floor(drawdownsAtDay.length * 0.9)] || 0,
-      worst: drawdownsAtDay[drawdownsAtDay.length - 1] || 0
-    });
-  }
-  
-  return {
-    data: drawdownData,
-    stats: {
-      median: maxDrawdowns[Math.floor(maxDrawdowns.length * 0.5)],
-      p90: maxDrawdowns[Math.floor(maxDrawdowns.length * 0.9)],
-      p95: maxDrawdowns[Math.floor(maxDrawdowns.length * 0.95)],
-      worst: maxDrawdowns[maxDrawdowns.length - 1],
-      avgMaxDrawdown: maxDrawdowns.reduce((a, b) => a + b, 0) / maxDrawdowns.length
-    }
-  };
-};
-
-// Correlation matrix (simplified - real would use historical data)
-const generateCorrelationMatrix = (tickers) => {
-  const n = tickers.length;
-  const matrix = Array(n).fill(0).map(() => Array(n).fill(0));
-  
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      if (i === j) {
-        matrix[i][j] = 1;
-      } else {
-        const t1 = tickers[i];
-        const t2 = tickers[j];
-        
-        // Equities correlate highly with each other
-        if (['SPY', 'QQQ', 'VTI', 'IWM'].includes(t1) && 
-            ['SPY', 'QQQ', 'VTI', 'IWM'].includes(t2)) {
-          matrix[i][j] = 0.85;
-        }
-        // Tech stocks correlate highly
-        else if (['AAPL', 'MSFT', 'GOOGL', 'QQQ'].includes(t1) && 
-                 ['AAPL', 'MSFT', 'GOOGL', 'QQQ'].includes(t2)) {
-          matrix[i][j] = 0.75;
-        }
-        // Bonds negatively correlate with stocks
-        else if ((t1 === 'BND' && t2 !== 'GLD') || (t2 === 'BND' && t1 !== 'GLD')) {
-          matrix[i][j] = -0.3;
-        }
-        // Gold has low correlation
-        else if (t1 === 'GLD' || t2 === 'GLD') {
-          matrix[i][j] = 0.1;
-        }
-        // TSLA is volatile and less correlated
-        else if (t1 === 'TSLA' || t2 === 'TSLA') {
-          matrix[i][j] = 0.5;
-        }
-        else {
-          matrix[i][j] = 0.6;
-        }
-      }
-    }
-  }
-  return matrix;
-};
-
-// ============================================================================
-// JUMP DIFFUSION MODEL (Merton)
-// ============================================================================
-// Models sudden market shocks (earnings surprises, geopolitical events)
-// Adds random jumps to the continuous diffusion process
-
-const generateJump = (jumpIntensity = 0.02, jumpMean = -0.02, jumpVol = 0.03) => {
-  // Poisson process for jump occurrence
-  if (Math.random() < jumpIntensity) {
-    // Jump size is normally distributed
-    return randomNormal(jumpMean, jumpVol);
-  }
-  return 0;
-};
-
-// ============================================================================
-// MEAN REVERSION (Ornstein-Uhlenbeck)
-// ============================================================================
-// Models tendency of prices to revert to long-term mean
-// Useful for interest rates, volatility, and some commodities
-
-class MeanReversionModel {
-  constructor(longTermMean = 0.0003, reversionSpeed = 0.1) {
-    this.longTermMean = longTermMean;
-    this.reversionSpeed = reversionSpeed;
-    this.currentValue = longTermMean;
-  }
-  
-  step(volatility) {
-    const drift = this.reversionSpeed * (this.longTermMean - this.currentValue);
-    const diffusion = volatility * randomNormal();
-    this.currentValue += drift + diffusion;
-    return this.currentValue;
-  }
-}
-
-// ============================================================================
-// ADVANCED MONTE CARLO ENGINE
-// ============================================================================
-
-const runAdvancedMonteCarloSimulation = (
-  portfolio, 
-  initialValue, 
-  days, 
-  simulations, 
-  options = {}
-) => {
-  const {
-    useCorrelation = true,
-    useFatTails = true,
-    useGARCH = true,
-    useRegimeSwitching = true,
-    useJumpDiffusion = true,
-    useMeanReversion = false,
-    scenarios = {}
-  } = options;
-  
-  const results = [];
-  const tickers = portfolio.map(p => p.ticker);
-  const weights = portfolio.map(p => p.weight);
-  
-  // Pre-compute correlation structure
-  const correlationMatrix = useCorrelation ? generateCorrelationMatrix(tickers) : null;
-  const choleskyMatrix = correlationMatrix ? choleskyDecomposition(correlationMatrix) : null;
-  
-  for (let sim = 0; sim < simulations; sim++) {
-    let value = initialValue;
-    const path = [{ day: 0, value, regime: 'bull' }];
-    
-    // Initialize GARCH models for each asset
-    const garchModels = useGARCH 
-      ? portfolio.map(() => new GARCHModel())
-      : null;
-    
-    // Initialize mean reversion models for each asset
-    const meanReversionModels = useMeanReversion
-      ? portfolio.map(({ ticker }) => {
-          const params = assetDatabase[ticker] || { mean: 0.0003 };
-          return new MeanReversionModel(params.mean, 0.05);
-        })
-      : null;
-    
-    // Initialize regime switching model
-    const regimeModel = useRegimeSwitching ? new RegimeSwitchingModel() : null;
-    
-    for (let day = 1; day <= days; day++) {
-      let dailyReturn = 0;
-      
-      // Get regime parameters if using regime switching
-      const regimeParams = regimeModel ? regimeModel.getParameters() : null;
-      const currentRegime = regimeModel ? regimeModel.getCurrentRegime() : 'bull';
-      
-      // Generate correlated returns
-      let returns;
-      if (useCorrelation && choleskyMatrix) {
-        returns = generateCorrelatedReturns(choleskyMatrix, useFatTails, 5);
-      } else {
-        returns = portfolio.map(() => useFatTails ? randomStudentT(5) : randomNormal());
-      }
-      
-      portfolio.forEach(({ ticker, weight }, idx) => {
-        const assetParams = assetDatabase[ticker] || { mean: 0.0003, vol: 0.012 };
-        
-        // Base return with regime adjustment
-        let mean = assetParams.mean;
-        let vol = assetParams.vol;
-        
-        // Apply mean reversion if enabled
-        if (useMeanReversion && meanReversionModels) {
-          mean = meanReversionModels[idx].step(vol * 0.1);
-        }
-        
-        if (regimeParams) {
-          mean = mean * (regimeParams.mean / 0.0003);
-          vol = vol * (regimeParams.vol / 0.01);
-        }
-        
-        // Apply GARCH volatility
-        if (useGARCH && garchModels) {
-          const baseReturn = returns[idx] * vol + mean;
-          vol = garchModels[idx].update(baseReturn);
-        }
-        
-        let assetReturn = returns[idx] * vol + mean;
-        
-        // Apply jump diffusion (Merton model) if enabled
-        if (useJumpDiffusion) {
-          const jumpSize = generateJump(0.01, -0.015, 0.025); // 1% daily jump probability
-          assetReturn += jumpSize;
-        }
-        
-        // Apply scenario adjustments
-        if (scenarios.recession) assetReturn *= 0.7;
-        if (scenarios.volatilitySpike) assetReturn *= (1 + randomNormal(0, 0.5));
-        if (scenarios.bullMarket) assetReturn *= 1.3;
-        
-        dailyReturn += assetReturn * weight;
-      });
-      
-      value *= (1 + dailyReturn);
-      
-      // Transition regime for next period
-      if (regimeModel) regimeModel.transition();
-      
-      path.push({ day, value, regime: currentRegime });
-    }
-    
-    results.push(path);
-  }
-  
-  return results;
-};
-
-// ============================================================================
-// ============================================================================
-// BACKEND RESPONSE TRANSFORMER
-// ============================================================================
-
-/**
- * Transform backend simulation response to frontend format
- * Backend returns: { final_values, risk_metrics, sample_paths, yearly_data }
- * Frontend expects: Array of paths, each path is [{ day, value }, ...]
- */
-const transformBackendResponse = (backendResponse, timeHorizonDays) => {
-  if (!backendResponse) return null;
-  
-  const initialValue = backendResponse.summary?.initial_investment || 10000;
-  const numSimulations = backendResponse.summary?.num_simulations || 1000;
-  const timeHorizonYears = backendResponse.summary?.time_horizon || Math.ceil(timeHorizonDays / 252);
-  const finalValues = backendResponse.final_values;
-  const yearlyData = backendResponse.yearly_data || [];
-  const samplePaths = backendResponse.sample_paths || [];
-  
-  // Generate paths using yearly_data statistics
-  const paths = [];
-  
-  for (let sim = 0; sim < numSimulations; sim++) {
-    const path = [];
-    
-    // Sample a final value from the distribution
-    const mean = finalValues?.mean || initialValue;
-    const std = finalValues?.std || 0;
-    const min = finalValues?.min || initialValue;
-    const max = finalValues?.max || initialValue;
-    
-    // Use percentile-based sampling for more realistic distribution
-    const percentile = Math.random() * 100;
-    let targetFinalValue;
-    
-    if (finalValues?.percentiles) {
-      // Use actual percentiles if available
-      const p = Math.floor(percentile / 10) * 10;
-      targetFinalValue = finalValues.percentiles[String(p)] || 
-        mean + (Math.random() - 0.5) * std * 2;
-    } else {
-      // Fallback to normal distribution sampling
-      targetFinalValue = Math.max(min, Math.min(max,
-        mean + (Math.random() - 0.5) * std * 4
-      ));
-    }
-    
-    // Generate path using yearly_data for intermediate points
-    for (let day = 0; day <= timeHorizonDays; day++) {
-      const year = day / 252;
-      const yearIndex = Math.floor(year);
-      const nextYearIndex = Math.min(yearIndex + 1, yearlyData.length - 1);
-      const t = year - yearIndex;
-      
-      let value;
-      
-      if (yearlyData.length > 0 && yearIndex < yearlyData.length) {
-        // Use yearly data for interpolation
-        const currentYearData = yearlyData[yearIndex];
-        const nextYearData = yearlyData[nextYearIndex] || currentYearData;
-        
-        // Interpolate between years using mean values
-        const currentMean = currentYearData.mean || initialValue;
-        const nextMean = nextYearData.mean || currentMean;
-        const interpolatedMean = currentMean + (nextMean - currentMean) * t;
-        
-        // Add some variation based on std
-        const currentStd = currentYearData.std || 0;
-        const variation = (Math.random() - 0.5) * currentStd * 0.5;
-        value = interpolatedMean + variation;
-      } else {
-        // Fallback: linear interpolation from initial to final
-        const progress = day / timeHorizonDays;
-        value = initialValue + (targetFinalValue - initialValue) * progress;
-        
-        // Add some random walk variation
-        const dailyVol = std / Math.sqrt(timeHorizonDays);
-        value *= (1 + (Math.random() - 0.5) * dailyVol * 0.1);
-      }
-      
-      // Ensure value is positive and reasonable
-      value = Math.max(0, value);
-      
-      path.push({ day, value });
-    }
-    
-    // Adjust final value to match target
-    if (path.length > 0) {
-      const adjustment = targetFinalValue / path[path.length - 1].value;
-      path.forEach(point => {
-        point.value *= adjustment;
-      });
-    }
-    
-    paths.push(path);
-  }
-  
-  return paths;
-};
-
-/**
- * Extract backend metrics (expected return and volatility) from response
- * These are the INPUT parameters used in the Monte Carlo, based on real historical data
- */
-const extractBackendMetrics = (backendResponse) => {
-  if (!backendResponse?.summary) return null;
-  
-  return {
-    expectedReturn: backendResponse.summary.expected_return * 100, // Convert to percentage
-    volatility: backendResponse.summary.volatility * 100, // Convert to percentage
-    initialInvestment: backendResponse.summary.initial_investment,
-    timeHorizon: backendResponse.summary.time_horizon,
-  };
-};
-
-// RISK METRICS (same as before with safety checks)
-// ============================================================================
-
-const calculateRiskMetrics = (simulations, initialValue, timeHorizonDays = 2520) => {
-  if (!simulations || simulations.length === 0) return null;
-  
-  const finalValues = simulations.map(path => {
-    const lastPoint = path[path.length - 1];
-    return lastPoint ? lastPoint.value : initialValue;
-  }).filter(v => v !== undefined && v !== null);
-  
-  if (finalValues.length === 0) return null;
-  
-  finalValues.sort((a, b) => a - b);
-  
-  // Calculate total returns (cumulative over entire period)
-  const totalReturns = finalValues.map(v => (v - initialValue) / initialValue);
-  const meanTotalReturn = totalReturns.reduce((a, b) => a + b, 0) / totalReturns.length;
-  
-  // Convert to annualized return: (1 + total_return)^(1/years) - 1
-  const years = Math.max(timeHorizonDays / 252, 1);
-  const meanAnnualizedReturn = Math.pow(1 + meanTotalReturn, 1 / years) - 1;
-  
-  // For volatility, we need annualized standard deviation of returns
-  const variance = totalReturns.reduce((a, r) => a + Math.pow(r - meanTotalReturn, 2), 0) / totalReturns.length;
-  const stdDev = Math.sqrt(variance);
-  // Annualize volatility (approximate)
-  const annualizedVol = stdDev / Math.sqrt(years);
-  
-  // Kurtosis calculation for tail risk
-  const kurtosis = totalReturns.reduce((a, r) => a + Math.pow(r - meanTotalReturn, 4), 0) / 
-    (totalReturns.length * Math.pow(stdDev, 4));
-  
-  const var95 = finalValues[Math.floor(finalValues.length * 0.05)] || initialValue;
-  const var99 = finalValues[Math.floor(finalValues.length * 0.01)] || initialValue;
-  
-  const tailLosses = finalValues.filter(v => v <= var95);
-  const expectedShortfall = tailLosses.length > 0 
-    ? tailLosses.reduce((a, b) => a + b, 0) / tailLosses.length 
-    : var95;
-  
-  return {
-    mean: meanAnnualizedReturn * 100, // Annualized expected return %
-    totalReturn: meanTotalReturn * 100, // Total cumulative return %
-    volatility: annualizedVol * 100, // Annualized volatility %
-    kurtosis: kurtosis,
-    var95: ((var95 - initialValue) / initialValue) * 100,
-    var99: ((var99 - initialValue) / initialValue) * 100,
-    expectedShortfall: ((expectedShortfall - initialValue) / initialValue) * 100,
-    sharpeRatio: annualizedVol > 0 ? meanAnnualizedReturn / annualizedVol : 0,
-    percentiles: {
-      p10: finalValues[Math.floor(finalValues.length * 0.1)] || initialValue,
-      p25: finalValues[Math.floor(finalValues.length * 0.25)] || initialValue,
-      p50: finalValues[Math.floor(finalValues.length * 0.5)] || initialValue,
-      p75: finalValues[Math.floor(finalValues.length * 0.75)] || initialValue,
-      p90: finalValues[Math.floor(finalValues.length * 0.9)] || initialValue,
-    }
-  };
-};
+import {
+  useFanChartData,
+  useDynamicPercentileData,
+  useSamplePathsData,
+  useDistributionData,
+  useCorrelationData,
+  usePieChartData,
+  useComparisonPieData,
+  useEfficientFrontierData,
+  useBenchmarkSimulation
+} from './hooks/useChartData';
 
 // ============================================================================
 // REACT COMPONENT
@@ -860,11 +88,6 @@ const PortfolioPath = () => {
   // NEW: Benchmark
   const [showBenchmark, setShowBenchmark] = useState(true);
   const [benchmarkTicker, setBenchmarkTicker] = useState('SPY');
-  const [benchmarkData, setBenchmarkData] = useState(null); // Real benchmark data from backend
-  
-  // NEW: Backend-sourced metrics (expected_return and volatility from real data)
-  const [backendMetrics, setBackendMetrics] = useState(null);
-  const [comparisonBackendMetrics, setComparisonBackendMetrics] = useState(null);
   
   // NEW: Efficient frontier
   const [showEfficientFrontier, setShowEfficientFrontier] = useState(false);
@@ -899,6 +122,55 @@ const PortfolioPath = () => {
   const { user, logout, isAuthenticated } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSavedPortfolios, setShowSavedPortfolios] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  
+  // Onboarding tutorial
+  const { showTutorial, startTutorial, closeTutorial } = useTutorial();
+  
+  // Premium/Pro tier status
+  const { 
+    isPremium, 
+    hasFeature, 
+    canRunSimulation, 
+    trackSimulation,
+    dailySimulations,
+    FREE_SIMULATION_LIMIT 
+  } = usePremium();
+
+  // Real market data hooks - fetch live parameters from Yahoo Finance
+  const { 
+    data: marketData, 
+    loading: marketDataLoading, 
+    error: marketDataError,
+    refresh: refreshMarketData 
+  } = useMarketData(portfolio, backendConnected);
+  
+  // Also fetch for comparison portfolio when in comparison mode
+  const { 
+    data: comparisonMarketData,
+    loading: comparisonMarketLoading 
+  } = useMarketData(comparisonPortfolio, backendConnected && comparisonMode);
+  
+  // Real-time quotes for display (prices, changes)
+  const tickers = useMemo(() => 
+    portfolio.map(p => p.ticker).filter(t => t && t.length > 0),
+    [portfolio]
+  );
+  const { quotes: liveQuotes, loading: quotesLoading } = useRealTimeQuotes(tickers, backendConnected);
+
+  // Helper to get asset parameters (uses real data if available, falls back to static)
+  const getPortfolioAssetParams = useCallback((ticker) => {
+    const upperTicker = ticker?.toUpperCase();
+    if (!upperTicker) return { mean: 0.0003, vol: 0.015, name: 'Unknown' };
+    
+    // Try real market data first
+    if (marketData?.[upperTicker]) {
+      return marketData[upperTicker];
+    }
+    
+    // Fallback to cache or static
+    return getAssetParams(upperTicker);
+  }, [marketData]);
 
   const addPosition = () => {
     setPortfolio([...portfolio, { ticker: '', weight: 0 }]);
@@ -995,6 +267,24 @@ const PortfolioPath = () => {
       return;
     }
     
+    // Check simulation limit for free users
+    const simLimit = canRunSimulation();
+    if (!simLimit.allowed) {
+      toast.error(
+        `Daily simulation limit reached (${FREE_SIMULATION_LIMIT}/${FREE_SIMULATION_LIMIT}). Upgrade to Pro for unlimited simulations!`,
+        { duration: 5000 }
+      );
+      setShowPaymentModal(true);
+      return;
+    }
+    
+    // Track simulation usage
+    if (!trackSimulation()) {
+      toast.warning('Simulation limit reached. Upgrade to Pro for unlimited access.');
+      setShowPaymentModal(true);
+      return;
+    }
+    
     setIsSimulating(true);
     setSimulationProgress(0);
     
@@ -1036,16 +326,12 @@ const PortfolioPath = () => {
           // Transform backend response to frontend format
           const transformedResults = transformBackendResponse(backendResponse, timeHorizon);
           
-          // Extract and store backend metrics (real expected return and volatility)
-          const metrics = extractBackendMetrics(backendResponse);
-          setBackendMetrics(metrics);
-          
           if (transformedResults) {
             setSimulationProgress(100);
             setSimulationResults(transformedResults);
             
             // Cache results
-            cacheSimulationResults(getCurrentPortfolioData(), transformedResults, calculateRiskMetrics(transformedResults, initialValue, timeHorizon));
+            cacheSimulationResults(getCurrentPortfolioData(), transformedResults, calculateRiskMetrics(transformedResults, initialValue));
             
             // Run comparison simulation if in comparison mode
             if (comparisonMode && Math.abs(totalComparisonWeight - 1) <= 0.01) {
@@ -1068,9 +354,6 @@ const PortfolioPath = () => {
                 const compTransformed = transformBackendResponse(compBackendResponse, timeHorizon);
                 if (compTransformed) {
                   setComparisonResults(compTransformed);
-                  // Store comparison metrics
-                  const compMetrics = extractBackendMetrics(compBackendResponse);
-                  setComparisonBackendMetrics(compMetrics);
                 }
               } catch (compError) {
                 console.warn('Comparison simulation failed, using client-side fallback:', compError);
@@ -1083,11 +366,9 @@ const PortfolioPath = () => {
                   { ...advancedOptions, scenarios }
                 );
                 setComparisonResults(compResults);
-                setComparisonBackendMetrics(null); // No backend metrics for client-side
               }
             } else {
               setComparisonResults(null);
-              setComparisonBackendMetrics(null);
             }
             
             setIsSimulating(false);
@@ -1127,11 +408,8 @@ const PortfolioPath = () => {
         setSimulationProgress(100);
         setSimulationResults(results);
         
-        // Clear backend metrics when using client-side simulation
-        setBackendMetrics(null);
-        
         // Cache results
-        cacheSimulationResults(getCurrentPortfolioData(), results, calculateRiskMetrics(results, initialValue, timeHorizon));
+        cacheSimulationResults(getCurrentPortfolioData(), results, calculateRiskMetrics(results, initialValue));
         
         // Run comparison simulation if in comparison mode
         if (comparisonMode && Math.abs(totalComparisonWeight - 1) <= 0.01) {
@@ -1146,10 +424,8 @@ const PortfolioPath = () => {
             }
           );
           setComparisonResults(compResults);
-          setComparisonBackendMetrics(null);
         } else {
           setComparisonResults(null);
-          setComparisonBackendMetrics(null);
         }
         
         setIsSimulating(false);
@@ -1184,37 +460,14 @@ const PortfolioPath = () => {
 
   const riskMetrics = useMemo(() => {
     if (!simulationResults) return null;
-    const calculatedMetrics = calculateRiskMetrics(simulationResults, initialValue, timeHorizon);
-    
-    // If we have backend metrics, use the backend's expected return and volatility
-    // These are based on real historical data, not simulation results
-    if (backendMetrics && calculatedMetrics) {
-      return {
-        ...calculatedMetrics,
-        mean: backendMetrics.expectedReturn, // Use backend's expected return (based on historical data)
-        volatility: backendMetrics.volatility, // Use backend's volatility (based on historical data)
-      };
-    }
-    
-    return calculatedMetrics;
-  }, [simulationResults, initialValue, timeHorizon, backendMetrics]);
+    return calculateRiskMetrics(simulationResults, initialValue);
+  }, [simulationResults, initialValue]);
   
   // Comparison risk metrics
   const comparisonRiskMetrics = useMemo(() => {
     if (!comparisonResults) return null;
-    const calculatedMetrics = calculateRiskMetrics(comparisonResults, initialValue, timeHorizon);
-    
-    // If we have backend metrics for comparison, use them
-    if (comparisonBackendMetrics && calculatedMetrics) {
-      return {
-        ...calculatedMetrics,
-        mean: comparisonBackendMetrics.expectedReturn,
-        volatility: comparisonBackendMetrics.volatility,
-      };
-    }
-    
-    return calculatedMetrics;
-  }, [comparisonResults, initialValue, timeHorizon, comparisonBackendMetrics]);
+    return calculateRiskMetrics(comparisonResults, initialValue);
+  }, [comparisonResults, initialValue]);
 
   // Goal probability calculation
   const goalProbability = useMemo(() => {
@@ -1385,26 +638,27 @@ const PortfolioPath = () => {
       }));
   }, [comparisonPortfolio]);
 
-  // Efficient Frontier calculation
+  // Efficient Frontier calculation - uses real market data when available
   const efficientFrontierData = useMemo(() => {
     if (!showEfficientFrontier || !riskMetrics) return [];
     
     // Generate random portfolio combinations for efficient frontier visualization
     const points = [];
-    const tickers = portfolio.map(p => p.ticker).filter(t => t);
+    const tickerList = portfolio.map(p => p.ticker).filter(t => t);
     
     // Generate 50 random portfolio allocations
     for (let i = 0; i < 50; i++) {
-      const randomWeights = tickers.map(() => Math.random());
+      const randomWeights = tickerList.map(() => Math.random());
       const sum = randomWeights.reduce((a, b) => a + b, 0);
       const normalizedWeights = randomWeights.map(w => w / sum);
       
       // Calculate expected return and volatility for this allocation
+      // Uses real market data when available
       let expectedReturn = 0;
       let variance = 0;
       
       normalizedWeights.forEach((w, idx) => {
-        const params = assetDatabase[tickers[idx]] || { mean: 0.0003, vol: 0.012 };
+        const params = getPortfolioAssetParams(tickerList[idx]);
         expectedReturn += w * params.mean * 252 * 100; // Annualized
         variance += Math.pow(w * params.vol * Math.sqrt(252) * 100, 2);
       });
@@ -1412,7 +666,7 @@ const PortfolioPath = () => {
       points.push({
         volatility: Math.sqrt(variance),
         return: expectedReturn,
-        weights: normalizedWeights.map((w, i) => `${tickers[i]}: ${(w * 100).toFixed(0)}%`).join(', ')
+        weights: normalizedWeights.map((w, i) => `${tickerList[i]}: ${(w * 100).toFixed(0)}%`).join(', ')
       });
     }
     
@@ -1435,67 +689,23 @@ const PortfolioPath = () => {
     }
     
     return points;
-  }, [showEfficientFrontier, riskMetrics, comparisonRiskMetrics, portfolio]);
+  }, [showEfficientFrontier, riskMetrics, comparisonRiskMetrics, portfolio, getPortfolioAssetParams]);
 
-  // Fetch benchmark data when ticker changes or simulation runs
-  useEffect(() => {
-    const fetchBenchmarkData = async () => {
-      if (!simulationResults || !benchmarkTicker || !backendConnected) {
-        // Use fallback from assetDatabase when backend unavailable
-        const fallbackParams = assetDatabase[benchmarkTicker] || { mean: 0.0003, vol: 0.012 };
-        setBenchmarkData({
-          mean: fallbackParams.mean * 252 * 100, // Annualized return %
-          volatility: fallbackParams.vol * Math.sqrt(252) * 100, // Annualized volatility %
-          ticker: benchmarkTicker,
-          source: 'fallback'
-        });
-        return;
-      }
-      
-      try {
-        // Fetch real historical data for benchmark using same time horizon as portfolio
-        const params = await fetchAssetParameters(benchmarkTicker, timeHorizon);
-        setBenchmarkData({
-          mean: params.mean * 100, // Already annualized from backend, convert to %
-          volatility: params.vol * 100, // Already annualized from backend, convert to %
-          ticker: benchmarkTicker,
-          source: 'backend',
-          dataPoints: params.dataPoints,
-          weighted: params.weighted
-        });
-      } catch (error) {
-        console.warn('Failed to fetch benchmark data, using fallback:', error);
-        // Use fallback from assetDatabase
-        const fallbackParams = assetDatabase[benchmarkTicker] || { mean: 0.0003, vol: 0.012 };
-        setBenchmarkData({
-          mean: fallbackParams.mean * 252 * 100,
-          volatility: fallbackParams.vol * Math.sqrt(252) * 100,
-          ticker: benchmarkTicker,
-          source: 'fallback'
-        });
-      }
-    };
-    
-    fetchBenchmarkData();
-  }, [simulationResults, benchmarkTicker, backendConnected, timeHorizon]);
-
-  // Benchmark simulation for comparison (use benchmarkData state)
+  // Benchmark simulation for comparison - uses real market data when available
   const benchmarkSimulation = useMemo(() => {
     if (!simulationResults || !benchmarkTicker) return null;
     
-    // Use real benchmark data if available, otherwise use assetDatabase
-    if (benchmarkData) {
-      return benchmarkData;
-    }
+    // Use real market data for benchmark when available
+    const benchmarkParams = getPortfolioAssetParams(benchmarkTicker);
     
-    // Fallback to hardcoded values
-    const benchmarkParams = assetDatabase[benchmarkTicker] || { mean: 0.0003, vol: 0.012 };
+    // Calculate annualized metrics for benchmark
     return {
-      mean: benchmarkParams.mean * 252 * 100,
-      volatility: benchmarkParams.vol * Math.sqrt(252) * 100,
-      ticker: benchmarkTicker
+      mean: benchmarkParams.mean * 252 * 100, // Annualized return %
+      volatility: benchmarkParams.vol * Math.sqrt(252) * 100, // Annualized volatility %
+      ticker: benchmarkTicker,
+      isRealData: !!marketData?.[benchmarkTicker.toUpperCase()]
     };
-  }, [simulationResults, benchmarkTicker, benchmarkData]);
+  }, [simulationResults, benchmarkTicker, getPortfolioAssetParams, marketData]);
 
   // Page transition variants for Framer Motion - minimal transitions to avoid flash
   const pageVariants = {
@@ -1552,6 +762,35 @@ const PortfolioPath = () => {
               <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div>
               <span className={`text-xs ${colors.textSubtle} font-mono`}>LIVE</span>
               
+              {/* Market Data Status Indicator */}
+              {backendConnected && (
+                <div className="flex items-center gap-2 ml-2">
+                  {marketDataLoading ? (
+                    <div className="flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
+                      <span className="text-xs text-blue-400 font-mono">FETCHING DATA...</span>
+                    </div>
+                  ) : Object.keys(marketData || {}).length > 0 ? (
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                      <span className="text-xs text-green-400 font-mono">REAL DATA</span>
+                      <button
+                        onClick={refreshMarketData}
+                        className={`p-1 ${colors.buttonSecondary} rounded transition-all hover:scale-105`}
+                        title="Refresh market data"
+                      >
+                        <RefreshCw className="w-3 h-3 text-green-400" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                      <span className="text-xs text-yellow-400 font-mono">STATIC DATA</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              
               {/* Theme Toggle */}
               <button
                 onClick={toggleTheme}
@@ -1564,6 +803,7 @@ const PortfolioPath = () => {
             <div className="flex items-center gap-2">
               {/* Comparison Mode Toggle */}
               <button
+                data-tour="compare"
                 onClick={() => setComparisonMode(!comparisonMode)}
                 className={`px-4 py-2 ${comparisonMode ? 'bg-blue-600 border-blue-500' : colors.buttonSecondary} rounded-lg transition-all border flex items-center gap-2 text-sm`}
               >
@@ -1573,6 +813,22 @@ const PortfolioPath = () => {
               
               {isAuthenticated ? (
                 <>
+                  {/* Pro Badge / Upgrade Button */}
+                  {isPremium ? (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg">
+                      <Crown className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-semibold text-amber-400">PRO</span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowPaymentModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 rounded-lg transition-all shadow-lg shadow-rose-900/30"
+                    >
+                      <Star className="w-4 h-4 text-white" />
+                      <span className="text-xs font-semibold text-white">Upgrade</span>
+                    </button>
+                  )}
+                  
                   <button
                     onClick={() => setShowSavedPortfolios(!showSavedPortfolios)}
                     className={`px-4 py-2 ${colors.card} rounded-lg transition-all border flex items-center gap-2 text-sm`}
@@ -1620,7 +876,7 @@ const PortfolioPath = () => {
           )}
 
           {/* Preset Portfolio Templates */}
-          <div className={`mb-4 ${colors.card} rounded-xl p-4 border`}>
+          <div data-tour="presets" className={`mb-4 ${colors.card} rounded-xl p-4 border`}>
             <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
               <Package className="w-4 h-4 text-rose-400" />
               Quick Start Templates
@@ -1687,7 +943,7 @@ const PortfolioPath = () => {
                 Portfolio Configuration
               </h2>
 
-              <div className="grid grid-cols-2 gap-4 mb-5">
+              <div data-tour="parameters" className="grid grid-cols-2 gap-4 mb-5">
                 <div>
                   <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Initial Capital</label>
                   <input
@@ -1709,11 +965,11 @@ const PortfolioPath = () => {
               </div>
 
               <div className="mb-5">
-                <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Time Horizon (Days) — Default 252 (1 year)</label>
+                <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Time Horizon (Days) — Max 1000</label>
                 <input
                   type="number"
                   value={timeHorizon}
-                  onChange={(e) => setTimeHorizon(Math.max(1, Math.min(1000, parseInt(e.target.value) || 252)))}
+                  onChange={(e) => setTimeHorizon(Math.max(1, Math.min(1000, parseInt(e.target.value) || 250)))}
                   min="1"
                   max="1000"
                   className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono"
@@ -1724,7 +980,7 @@ const PortfolioPath = () => {
               </div>
 
               {/* Asset Allocation */}
-              <div className="mb-4">
+              <div data-tour="portfolio" className="mb-4">
                 <div className="flex justify-between items-center mb-3">
                   <label className={`text-xs font-medium ${colors.textMuted} uppercase tracking-wider`}>Asset Allocation</label>
                   <span className={`text-xs font-mono ${Math.abs(totalWeight - 1) < 0.01 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -1789,7 +1045,7 @@ const PortfolioPath = () => {
             </div>
 
             {/* Model Settings - Right Panel */}
-            <div className="bg-zinc-900/50 backdrop-blur-xl rounded-xl p-6 border border-zinc-800/50">
+            <div data-tour="advanced" className="bg-zinc-900/50 backdrop-blur-xl rounded-xl p-6 border border-zinc-800/50">
               <h2 className="text-lg font-semibold mb-5 flex items-center gap-2 text-zinc-200">
                 <Zap className="w-5 h-5 text-rose-400" />
                 Model Parameters
@@ -1971,6 +1227,25 @@ const PortfolioPath = () => {
             </div>
           </div>
 
+          {/* Simulation Limit Indicator (Free Users) */}
+          {!isPremium && isAuthenticated && (
+            <div className={`mt-4 p-3 ${colors.card} rounded-lg border flex items-center justify-between`}>
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-rose-400" />
+                <span className={`text-sm ${colors.textMuted}`}>
+                  Daily Simulations: {dailySimulations}/{FREE_SIMULATION_LIMIT}
+                </span>
+              </div>
+              <button
+                onClick={() => setShowPaymentModal(true)}
+                className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1"
+              >
+                <Star className="w-3 h-3" />
+                Get Unlimited
+              </button>
+            </div>
+          )}
+
           {/* Run Simulation Button */}
           <button
             onClick={runSimulation}
@@ -2009,6 +1284,20 @@ const PortfolioPath = () => {
         <AuthModal 
           isOpen={showAuthModal} 
           onClose={() => setShowAuthModal(false)}
+        />
+        
+        {/* Payment Modal */}
+        <PaymentModal 
+          isOpen={showPaymentModal} 
+          onClose={() => setShowPaymentModal(false)}
+          isDark={isDark}
+        />
+        
+        {/* Onboarding Tutorial */}
+        <OnboardingTutorial
+          isOpen={showTutorial}
+          onClose={closeTutorial}
+          isDark={isDark}
         />
       </div>
     );
@@ -2664,6 +1953,13 @@ const PortfolioPath = () => {
       <AuthModal 
         isOpen={showAuthModal} 
         onClose={() => setShowAuthModal(false)}
+      />
+      
+      {/* Payment Modal */}
+      <PaymentModal 
+        isOpen={showPaymentModal} 
+        onClose={() => setShowPaymentModal(false)}
+        isDark={isDark}
       />
     </>
   );

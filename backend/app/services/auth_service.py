@@ -1,6 +1,7 @@
 """Authentication service for JWT token management."""
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import secrets
 from jose import JWTError, jwt
 import bcrypt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,6 +125,60 @@ class AuthService:
         """Update user's last login timestamp."""
         user.last_login = datetime.utcnow()
         await db.commit()
+    
+    @staticmethod
+    def create_verification_token(email: str) -> str:
+        """Create an email verification token (JWT)."""
+        expire = datetime.now(timezone.utc) + timedelta(hours=24)  # 24 hour expiry
+        to_encode = {
+            "sub": email,
+            "type": "email_verification",
+            "exp": expire
+        }
+        return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+    
+    @staticmethod
+    def verify_email_token(token: str) -> Optional[str]:
+        """Verify email verification token and return email if valid."""
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("type") != "email_verification":
+                return None
+            return payload.get("sub")
+        except JWTError:
+            return None
+    
+    @staticmethod
+    async def verify_user_email(db: AsyncSession, email: str) -> bool:
+        """Mark a user's email as verified."""
+        user = await AuthService.get_user_by_email(db, email)
+        if user:
+            user.is_verified = True
+            await db.commit()
+            return True
+        return False
+    
+    @staticmethod
+    def create_password_reset_token(email: str) -> str:
+        """Create a password reset token (JWT)."""
+        expire = datetime.now(timezone.utc) + timedelta(hours=1)  # 1 hour expiry
+        to_encode = {
+            "sub": email,
+            "type": "password_reset",
+            "exp": expire
+        }
+        return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+    
+    @staticmethod
+    def verify_password_reset_token(token: str) -> Optional[str]:
+        """Verify password reset token and return email if valid."""
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("type") != "password_reset":
+                return None
+            return payload.get("sub")
+        except JWTError:
+            return None
 
 
 # Dependency for getting current user from token

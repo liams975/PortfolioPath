@@ -135,6 +135,24 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  /**
+   * Refresh user data from the server
+   */
+  const refreshUser = async () => {
+    const token = getAuthToken();
+    if (token) {
+      try {
+        const userData = await apiGetCurrentUser();
+        setUser(userData);
+        return userData;
+      } catch (e) {
+        console.log('Failed to refresh user data');
+        return null;
+      }
+    }
+    return null;
+  };
+
   const value = {
     user,
     loading,
@@ -144,6 +162,7 @@ export const AuthProvider = ({ children }) => {
     savePortfolio,
     getPortfolios,
     deletePortfolio,
+    refreshUser,
     isAuthenticated: !!user
   };
 

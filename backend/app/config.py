@@ -1,5 +1,5 @@
 """Application configuration using pydantic-settings."""
-from typing import List, Optional
+from typing import List
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -27,15 +27,6 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
-    
-    # Frontend URL (for payment redirects)
-    FRONTEND_URL: str = "http://localhost:5173"
-    
-    # Stripe Payment Configuration
-    STRIPE_SECRET_KEY: Optional[str] = None  # Set via environment variable
-    STRIPE_PUBLISHABLE_KEY: Optional[str] = None  # Set via environment variable
-    STRIPE_PRICE_ID: Optional[str] = None  # Stripe Price ID for lifetime premium
-    STRIPE_WEBHOOK_SECRET: Optional[str] = None  # For webhook signature verification
     
     @property
     def cors_origins_list(self) -> List[str]:
