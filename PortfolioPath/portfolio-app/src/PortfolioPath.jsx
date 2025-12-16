@@ -1819,7 +1819,7 @@ const PortfolioPath = () => {
                   <XAxis dataKey="value" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 9 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
                   <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 9 }} />
                   <Tooltip contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} />
-                  <Area type="monotone" dataKey="frequency" stroke="#e11d48" fill="#e11d48" fillOpacity={0.4} />
+                  <Area type="basis" dataKey="frequency" stroke="#e11d48" fill="#e11d48" fillOpacity={0.4} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

@@ -166,30 +166,29 @@ export const transformBackendResponse = (backendResponse, timeHorizonDays) => {
   // Generate paths using yearly_data statistics
   const paths = [];
   
+  // Get distribution parameters
+  const mean = finalValues?.mean || initialValue;
+  const std = finalValues?.std || initialValue * 0.2;
+  const min = finalValues?.min || initialValue * 0.5;
+  const max = finalValues?.max || initialValue * 2;
+  
   for (let sim = 0; sim < numSimulations; sim++) {
     const path = [];
     
-    // Sample a final value from the distribution
-    const mean = finalValues?.mean || initialValue;
-    const std = finalValues?.std || 0;
-    const min = finalValues?.min || initialValue;
-    const max = finalValues?.max || initialValue;
+    // Use Box-Muller transform for proper normal distribution sampling
+    // This creates a smooth bell curve instead of discrete buckets
+    const u1 = Math.random();
+    const u2 = Math.random();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     
-    // Use percentile-based sampling for more realistic distribution
-    const percentile = Math.random() * 100;
-    let targetFinalValue;
+    // Sample from normal distribution centered on mean with given std
+    let targetFinalValue = mean + z * std;
     
-    if (finalValues?.percentiles) {
-      // Use actual percentiles if available
-      const p = Math.floor(percentile / 10) * 10;
-      targetFinalValue = finalValues.percentiles[String(p)] || 
-        mean + (Math.random() - 0.5) * std * 2;
-    } else {
-      // Fallback to normal distribution sampling
-      targetFinalValue = Math.max(min, Math.min(max,
-        mean + (Math.random() - 0.5) * std * 4
-      ));
-    }
+    // Clamp to reasonable bounds
+    targetFinalValue = Math.max(min * 0.8, Math.min(max * 1.2, targetFinalValue));
+    
+    // Ensure positive value
+    targetFinalValue = Math.max(initialValue * 0.1, targetFinalValue);
     
     // Generate path using yearly_data for intermediate points
     for (let day = 0; day <= timeHorizonDays; day++) {
