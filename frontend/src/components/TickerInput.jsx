@@ -228,14 +228,22 @@ export const TickerInput = ({
             {statusIcon[status]}
           </div>
         </div>
-        <input
-          type="number"
-          placeholder="Weight"
-          value={weight}
-          onChange={(e) => onWeightChange(e.target.value)}
-          step="0.01"
-          className={`flex-1 ${isDark ? 'bg-zinc-800/50 border-zinc-700/50 text-zinc-100 placeholder-zinc-600' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'} border rounded-lg px-3 py-2 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono`}
-        />
+        <div className="relative flex-1">
+          <input
+            type="number"
+            placeholder="Weight %"
+            value={weight ? (weight * 100).toFixed(0) : ''}
+            onChange={(e) => {
+              const pct = parseFloat(e.target.value) || 0;
+              onWeightChange(Math.max(0, Math.min(100, pct)) / 100);
+            }}
+            min="0"
+            max="100"
+            step="1"
+            className={`w-full ${isDark ? 'bg-zinc-800/50 border-zinc-700/50 text-zinc-100 placeholder-zinc-600' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'} border rounded-lg px-3 py-2 pr-8 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono`}
+          />
+          <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${isDark ? 'text-zinc-500' : 'text-gray-400'}`}>%</span>
+        </div>
         <button
           onClick={onRemove}
           className={`px-3 py-2 ${isDark ? 'bg-zinc-800 hover:bg-rose-900/50 text-zinc-400 hover:text-rose-400' : 'bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500'} rounded-lg transition-all text-sm`}

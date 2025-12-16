@@ -937,45 +937,57 @@ const PortfolioPath = () => {
           {/* Main Grid Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Portfolio Config - Left Panel */}
-            <div className="lg:col-span-2 bg-zinc-900/50 backdrop-blur-xl rounded-xl p-6 border border-zinc-800/50">
-              <h2 className="text-lg font-semibold mb-5 flex items-center gap-2 text-zinc-200">
+            <div className={`lg:col-span-2 ${colors.card} backdrop-blur-xl rounded-xl p-6 ${colors.border}`}>
+              <h2 className={`text-lg font-semibold mb-5 flex items-center gap-2 ${colors.text}`}>
                 <Target className="w-5 h-5 text-rose-400" />
                 Portfolio Configuration
               </h2>
 
               <div data-tour="parameters" className="grid grid-cols-2 gap-4 mb-5">
                 <div>
-                  <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Initial Capital</label>
+                  <label className={`block text-xs font-medium mb-2 ${colors.textMuted} uppercase tracking-wider`}>Initial Capital ($)</label>
                   <input
                     type="number"
                     value={initialValue}
-                    onChange={(e) => setInitialValue(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono"
+                    onChange={(e) => setInitialValue(Math.max(0, parseFloat(e.target.value) || 0))}
+                    min="0"
+                    className={`w-full ${colors.input} ${colors.border} rounded-lg px-4 py-2.5 ${colors.text} placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono`}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Simulations</label>
+                  <label className={`block text-xs font-medium mb-2 ${colors.textMuted} uppercase tracking-wider`}>Simulations (100-10,000)</label>
                   <input
                     type="number"
                     value={numSimulations}
                     onChange={(e) => setNumSimulations(Math.max(100, Math.min(10000, parseInt(e.target.value) || 1000)))}
-                    className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono"
+                    min="100"
+                    max="10000"
+                    className={`w-full ${colors.input} ${colors.border} rounded-lg px-4 py-2.5 ${colors.text} placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono`}
                   />
                 </div>
               </div>
 
               <div className="mb-5">
-                <label className="block text-xs font-medium mb-2 text-zinc-400 uppercase tracking-wider">Time Horizon (Days) — Max 1000</label>
+                <div className="flex justify-between items-center mb-2">
+                  <label className={`text-xs font-medium ${colors.textMuted} uppercase tracking-wider`}>Time Horizon (Trading Days)</label>
+                  <span className={`text-xs ${colors.textSubtle}`}>≈ {(timeHorizon / 252).toFixed(1)} years</span>
+                </div>
                 <input
                   type="number"
                   value={timeHorizon}
-                  onChange={(e) => setTimeHorizon(Math.max(1, Math.min(1000, parseInt(e.target.value) || 250)))}
+                  onChange={(e) => setTimeHorizon(Math.max(1, Math.min(2520, parseInt(e.target.value) || 252)))}
                   min="1"
-                  max="1000"
-                  className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-4 py-2.5 text-zinc-100 placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono"
+                  max="2520"
+                  className={`w-full ${colors.input} ${colors.border} rounded-lg px-4 py-2.5 ${colors.text} placeholder-zinc-500 focus:ring-1 focus:ring-rose-500/50 focus:border-rose-500/50 focus:outline-none transition-all text-sm font-mono`}
                 />
-                <div className="mt-2 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-rose-500 to-red-500 transition-all" style={{ width: `${(timeHorizon / 1000) * 100}%` }}></div>
+                <div className={`mt-2 h-1 ${isDark ? 'bg-zinc-800' : 'bg-gray-200'} rounded-full overflow-hidden`}>
+                  <div className="h-full bg-gradient-to-r from-rose-500 to-red-500 transition-all" style={{ width: `${(timeHorizon / 2520) * 100}%` }}></div>
+                </div>
+                <div className={`flex justify-between text-xs ${colors.textSubtle} mt-1`}>
+                  <span>1 day</span>
+                  <span>1 yr (252)</span>
+                  <span>5 yrs (1260)</span>
+                  <span>10 yrs (2520)</span>
                 </div>
               </div>
 
@@ -1045,8 +1057,8 @@ const PortfolioPath = () => {
             </div>
 
             {/* Model Settings - Right Panel */}
-            <div data-tour="advanced" className="bg-zinc-900/50 backdrop-blur-xl rounded-xl p-6 border border-zinc-800/50">
-              <h2 className="text-lg font-semibold mb-5 flex items-center gap-2 text-zinc-200">
+            <div data-tour="advanced" className={`${colors.card} backdrop-blur-xl rounded-xl p-6 ${colors.border}`}>
+              <h2 className={`text-lg font-semibold mb-5 flex items-center gap-2 ${colors.text}`}>
                 <Zap className="w-5 h-5 text-rose-400" />
                 Model Parameters
               </h2>
@@ -1316,18 +1328,18 @@ const PortfolioPath = () => {
         <div className="max-w-3xl mx-auto">
           <button
             onClick={() => setView('input')}
-            className="mb-6 px-5 py-2 bg-zinc-900/80 hover:bg-zinc-800 backdrop-blur-xl rounded-lg transition-all border border-zinc-700/50 text-zinc-300 text-sm"
+            className={`mb-6 px-5 py-2 ${colors.card} hover:opacity-80 backdrop-blur-xl rounded-lg transition-all ${colors.border} ${colors.textMuted} text-sm`}
           >
             ← Back
           </button>
 
-          <div className="bg-zinc-900/50 backdrop-blur-xl rounded-xl p-6 border border-zinc-800/50">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-zinc-200">
+          <div className={`${colors.card} backdrop-blur-xl rounded-xl p-6 ${colors.border}`}>
+            <h2 className={`text-xl font-semibold mb-4 flex items-center gap-2 ${colors.text}`}>
               <Settings className="w-5 h-5 text-rose-400" />
               Scenario Testing
             </h2>
 
-            <p className="text-zinc-400 mb-6 text-sm">
+            <p className={`${colors.textMuted} mb-6 text-sm`}>
               Apply stress scenarios to adjust simulation parameters.
             </p>
 
@@ -1337,10 +1349,10 @@ const PortfolioPath = () => {
                 { key: 'volatilitySpike', label: 'Volatility Spike', desc: 'Volatility +50%' },
                 { key: 'bullMarket', label: 'Bull Market', desc: 'Returns +30%' },
               ].map(({ key, label, desc }) => (
-                <label key={key} className="flex items-center justify-between p-3 bg-zinc-800/30 rounded-lg cursor-pointer hover:bg-zinc-800/50 transition-all border border-zinc-700/30">
+                <label key={key} className={`flex items-center justify-between p-3 ${isDark ? 'bg-zinc-800/30 hover:bg-zinc-800/50 border-zinc-700/30' : 'bg-gray-50 hover:bg-gray-100 border-gray-200'} rounded-lg cursor-pointer transition-all border`}>
                   <div>
-                    <div className="text-sm font-medium text-zinc-200">{label}</div>
-                    <div className="text-xs text-zinc-500">{desc}</div>
+                    <div className={`text-sm font-medium ${colors.text}`}>{label}</div>
+                    <div className={`text-xs ${colors.textSubtle}`}>{desc}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -1354,7 +1366,7 @@ const PortfolioPath = () => {
 
             <button
               onClick={() => setView('input')}
-              className="w-full mt-5 py-3 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 rounded-lg transition-all font-medium shadow-lg shadow-rose-900/30"
+              className={`w-full mt-5 py-3 ${colors.button} rounded-lg transition-all font-medium shadow-lg shadow-rose-900/30 text-white`}
             >
               Apply Scenarios
             </button>
@@ -1386,7 +1398,7 @@ const PortfolioPath = () => {
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <button
               onClick={() => setView('input')}
-              className={`px-4 py-2 ${colors.card} hover:bg-zinc-800 dark:hover:bg-zinc-200 backdrop-blur-xl rounded-lg transition-all ${colors.border} text-sm`}
+              className={`px-4 py-2 ${colors.card} ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'} backdrop-blur-xl rounded-lg transition-all ${colors.border} text-sm`}
             >
               ← New Simulation
             </button>
