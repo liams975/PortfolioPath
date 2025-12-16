@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_HOUR: int = 1000
     
-    # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
+    # CORS - Include Firebase hosting URL
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000,https://portfoliopath-f9197.web.app,https://portfoliopath-f9197.firebaseapp.com"
     
     @property
     def cors_origins_list(self) -> List[str]:
