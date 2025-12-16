@@ -158,12 +158,9 @@ export const transformBackendResponse = (backendResponse, timeHorizonDays) => {
   
   const initialValue = backendResponse.summary?.initial_investment || 10000;
   const numSimulations = backendResponse.summary?.num_simulations || 1000;
-  const timeHorizonYears = backendResponse.summary?.time_horizon || Math.ceil(timeHorizonDays / 252);
   const finalValues = backendResponse.final_values;
-  const yearlyData = backendResponse.yearly_data || [];
-  const samplePaths = backendResponse.sample_paths || [];
   
-  // Generate paths using yearly_data statistics
+  // Generate paths
   const paths = [];
   
   // Get distribution parameters
@@ -172,70 +169,56 @@ export const transformBackendResponse = (backendResponse, timeHorizonDays) => {
   const min = finalValues?.min || initialValue * 0.5;
   const max = finalValues?.max || initialValue * 2;
   
+  // Daily volatility for random walk
+  const dailyVol = std / Math.sqrt(timeHorizonDays);
+  
   for (let sim = 0; sim < numSimulations; sim++) {
     const path = [];
     
     // Use Box-Muller transform for proper normal distribution sampling
-    // This creates a smooth bell curve instead of discrete buckets
     const u1 = Math.random();
     const u2 = Math.random();
     const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     
-    // Sample from normal distribution centered on mean with given std
+    // Sample target final value from normal distribution
     let targetFinalValue = mean + z * std;
     
     // Clamp to reasonable bounds
     targetFinalValue = Math.max(min * 0.8, Math.min(max * 1.2, targetFinalValue));
-    
-    // Ensure positive value
     targetFinalValue = Math.max(initialValue * 0.1, targetFinalValue);
     
-    // Generate path using yearly_data for intermediate points
-    for (let day = 0; day <= timeHorizonDays; day++) {
-      const year = day / 252;
-      const yearIndex = Math.floor(year);
-      const nextYearIndex = Math.min(yearIndex + 1, yearlyData.length - 1);
-      const t = year - yearIndex;
+    // Calculate the drift needed to reach target
+    const totalReturn = targetFinalValue / initialValue;
+    const dailyDrift = Math.pow(totalReturn, 1 / timeHorizonDays) - 1;
+    
+    // Generate path with geometric Brownian motion
+    let value = initialValue;
+    path.push({ day: 0, value });
+    
+    for (let day = 1; day <= timeHorizonDays; day++) {
+      // Random shock for this day
+      const shock = (Math.random() - 0.5) * 2 * dailyVol / initialValue;
       
-      let value;
+      // Apply drift + shock
+      value = value * (1 + dailyDrift + shock);
       
-      if (yearlyData.length > 0 && yearIndex < yearlyData.length) {
-        // Use yearly data for interpolation
-        const currentYearData = yearlyData[yearIndex];
-        const nextYearData = yearlyData[nextYearIndex] || currentYearData;
-        
-        // Interpolate between years using mean values
-        const currentMean = currentYearData.mean || initialValue;
-        const nextMean = nextYearData.mean || currentMean;
-        const interpolatedMean = currentMean + (nextMean - currentMean) * t;
-        
-        // Add some variation based on std
-        const currentStd = currentYearData.std || 0;
-        const variation = (Math.random() - 0.5) * currentStd * 0.5;
-        value = interpolatedMean + variation;
-      } else {
-        // Fallback: linear interpolation from initial to final
-        const progress = day / timeHorizonDays;
-        value = initialValue + (targetFinalValue - initialValue) * progress;
-        
-        // Add some random walk variation
-        const dailyVol = std / Math.sqrt(timeHorizonDays);
-        value *= (1 + (Math.random() - 0.5) * dailyVol * 0.1);
-      }
-      
-      // Ensure value is positive and reasonable
-      value = Math.max(0, value);
+      // Ensure positive
+      value = Math.max(initialValue * 0.01, value);
       
       path.push({ day, value });
     }
     
-    // Adjust final value to match target
-    if (path.length > 0) {
-      const adjustment = targetFinalValue / path[path.length - 1].value;
-      path.forEach(point => {
-        point.value *= adjustment;
-      });
-    }
+    // Scale path so final value matches target exactly
+    // This preserves the path shape but ensures correct final distribution
+    const actualFinal = path[path.length - 1].value;
+    const scale = targetFinalValue / actualFinal;
+    
+    // Apply scaling progressively (more at end, less at start)
+    path.forEach((point, idx) => {
+      const progress = idx / timeHorizonDays;
+      const adjustedScale = 1 + (scale - 1) * progress;
+      point.value = point.value * adjustedScale;
+    });
     
     paths.push(path);
   }
