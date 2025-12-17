@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
-import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package, RefreshCw, Crown, Star } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package, RefreshCw, Crown, Star, UserCircle } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useTheme } from './context/ThemeContext';
 import { usePremium, PRO_FEATURES, ProFeatureGate } from './context/PremiumContext';
 import AuthModal from './components/AuthModal';
 import PaymentModal from './components/PaymentModal';
+import AccountSettings from './components/AccountSettings';
 import OnboardingTutorial, { useTutorial } from './components/OnboardingTutorial';
 import SavedPortfolios from './components/SavedPortfolios';
 import { TickerInput } from './components/TickerInput';
@@ -123,6 +124,7 @@ const PortfolioPath = () => {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSavedPortfolios, setShowSavedPortfolios] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
   
   // Onboarding tutorial
   const { showTutorial, startTutorial, closeTutorial } = useTutorial();
@@ -840,6 +842,13 @@ const PortfolioPath = () => {
                     <User className={`w-4 h-4 ${colors.accent}`} />
                     <span className={`text-sm ${colors.textMuted}`}>{user.name}</span>
                   </div>
+                  <button 
+                    onClick={() => setShowAccountSettings(true)} 
+                    className={`p-2 ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'} rounded-lg transition-all`} 
+                    title="Account Settings"
+                  >
+                    <Settings className={`w-4 h-4 ${colors.textMuted} hover:${colors.accent}`} />
+                  </button>
                   <button onClick={logout} className={`p-2 ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'} rounded-lg transition-all`} title="Logout">
                     <LogOut className={`w-4 h-4 ${colors.textMuted} hover:text-rose-400`} />
                   </button>
@@ -1971,6 +1980,13 @@ const PortfolioPath = () => {
       <PaymentModal 
         isOpen={showPaymentModal} 
         onClose={() => setShowPaymentModal(false)}
+        isDark={isDark}
+      />
+      
+      {/* Account Settings Modal */}
+      <AccountSettings 
+        isOpen={showAccountSettings} 
+        onClose={() => setShowAccountSettings(false)}
         isDark={isDark}
       />
     </>
