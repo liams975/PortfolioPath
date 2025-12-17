@@ -32,6 +32,7 @@ class User(Base):
     
     # Relationships
     portfolios = relationship("Portfolio", back_populates="owner", cascade="all, delete-orphan")
+    simulation_usage = relationship("SimulationUsage", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username}, email={self.email}, premium={self.is_premium})>"

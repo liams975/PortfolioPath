@@ -266,6 +266,23 @@ export const fetchCorrelationMatrix = async (tickers) => {
 // MONTE CARLO SIMULATION API
 // ============================================================================
 
+/**
+ * Get current simulation usage status for authenticated user
+ */
+export const getSimulationUsage = async () => {
+  const response = await fetch(`${API_CONFIG.BASE_URL}/api/simulation/usage`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to get usage' }));
+    throw new Error(error.detail || 'Failed to get usage status');
+  }
+  
+  return response.json();
+};
+
 export const runSimulation = async ({
   holdings,
   initialInvestment = 10000,
@@ -281,7 +298,7 @@ export const runSimulation = async ({
 }) => {
   const response = await fetch(`${API_CONFIG.BASE_URL}/api/simulation/run`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({
       holdings: holdings.map(h => ({
         ticker: h.ticker,
@@ -303,6 +320,15 @@ export const runSimulation = async ({
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Simulation failed' }));
+    
+    // Handle specific errors
+    if (response.status === 401) {
+      throw new Error('Please sign in to run simulations');
+    }
+    if (response.status === 429) {
+      throw new Error(error.detail || 'Daily simulation limit reached. Upgrade to Pro for unlimited.');
+    }
+    
     throw new Error(error.detail || 'Simulation failed');
   }
   
@@ -312,7 +338,7 @@ export const runSimulation = async ({
 export const comparePortfolios = async (portfolioA, portfolioB) => {
   const response = await fetch(`${API_CONFIG.BASE_URL}/api/simulation/compare`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({
       portfolio_a: portfolioA,
       portfolio_b: portfolioB
@@ -322,6 +348,14 @@ export const comparePortfolios = async (portfolioA, portfolioB) => {
   
   if (!response.ok) {
     const error = await response.json();
+    
+    if (response.status === 401) {
+      throw new Error('Please sign in to compare portfolios');
+    }
+    if (response.status === 429) {
+      throw new Error(error.detail || 'Daily simulation limit reached');
+    }
+    
     throw new Error(error.detail || 'Comparison failed');
   }
   
@@ -633,6 +667,7 @@ export default {
   
   // Simulation
   runSimulation, comparePortfolios, generateEfficientFrontier, calculateGoalProbability,
+  getSimulationUsage,
   
   // Portfolios
   savePortfolio, loadPortfolios, getPortfolio, updatePortfolio, deletePortfolio, duplicatePortfolio,

@@ -2,10 +2,11 @@
  * Premium/Subscription Context
  * 
  * Manages user premium status and provides Pro feature gating
+ * Now uses server-side simulation tracking for accurate limits
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getPaymentStatus, verifyPaymentSession } from '../services/api';
+import { getPaymentStatus, verifyPaymentSession, getSimulationUsage } from '../services/api';
 import { useAuth } from './AuthContext';
 import { toast } from '../utils/toast';
 
@@ -30,7 +31,7 @@ const FREE_FEATURES = [
   PRO_FEATURES.SAVED_PORTFOLIOS, // Limited to 3
 ];
 
-// Daily simulation limits for free tier
+// Daily simulation limits for free tier (matches backend)
 const FREE_SIMULATION_LIMIT = 10;
 const FREE_PORTFOLIO_LIMIT = 3;
 
@@ -103,37 +104,38 @@ export const PremiumProvider = ({ children }) => {
     fetchPremiumStatus();
   }, [isAuthenticated, user]);
 
-  // Load daily simulation count from localStorage
-  useEffect(() => {
-    const today = new Date().toDateString();
-    const stored = localStorage.getItem('portfoliopath_simulations');
-    if (stored) {
-      const data = JSON.parse(stored);
-      if (data.date === today) {
-        setDailySimulations(data.count);
-      } else {
-        // Reset for new day
-        localStorage.setItem('portfoliopath_simulations', JSON.stringify({ date: today, count: 0 }));
-        setDailySimulations(0);
+  // Fetch simulation usage from server
+  const refreshUsage = useCallback(async () => {
+    if (!isAuthenticated) {
+      setDailySimulations(0);
+      return;
+    }
+
+    try {
+      const usage = await getSimulationUsage();
+      setDailySimulations(usage.daily_simulations || 0);
+      if (usage.is_premium) {
+        setIsPremium(true);
       }
+    } catch (error) {
+      console.error('Failed to fetch simulation usage:', error);
     }
-  }, []);
+  }, [isAuthenticated]);
 
-  // Track simulation usage
-  const trackSimulation = useCallback(() => {
+  // Load simulation usage from server on auth change
+  useEffect(() => {
+    refreshUsage();
+  }, [refreshUsage]);
+
+  // Track simulation usage (called after successful simulation)
+  // The actual tracking is now done server-side, this just refreshes the count
+  const trackSimulation = useCallback(async () => {
     if (isPremium) return true; // No limit for premium
-
-    const today = new Date().toDateString();
-    const newCount = dailySimulations + 1;
     
-    if (newCount > FREE_SIMULATION_LIMIT) {
-      return false; // Limit reached
-    }
-    
-    setDailySimulations(newCount);
-    localStorage.setItem('portfoliopath_simulations', JSON.stringify({ date: today, count: newCount }));
+    // Refresh count from server after simulation
+    await refreshUsage();
     return true;
-  }, [isPremium, dailySimulations]);
+  }, [isPremium, refreshUsage]);
 
   // Check if feature is available
   const hasFeature = useCallback((featureKey) => {
@@ -141,7 +143,7 @@ export const PremiumProvider = ({ children }) => {
     return FREE_FEATURES.includes(featureKey);
   }, [isPremium]);
 
-  // Check simulation limit
+  // Check simulation limit (server is the source of truth)
   const canRunSimulation = useCallback(() => {
     if (isPremium) return { allowed: true, remaining: Infinity };
     const remaining = Math.max(0, FREE_SIMULATION_LIMIT - dailySimulations);
@@ -170,6 +172,7 @@ export const PremiumProvider = ({ children }) => {
     canRunSimulation,
     canSavePortfolio,
     trackSimulation,
+    refreshUsage,
     dailySimulations,
     FREE_SIMULATION_LIMIT,
     FREE_PORTFOLIO_LIMIT,

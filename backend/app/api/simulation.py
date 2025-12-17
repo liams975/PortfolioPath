@@ -1,12 +1,24 @@
 """Monte Carlo simulation API endpoints."""
 import math
+from datetime import datetime, date
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.services.monte_carlo import MonteCarloEngine, SimulationConfig
 from app.services.stock_service import StockService
+from app.database import get_db
+from app.services.auth_service import get_current_user
+from app.models.user import User
+from app.models.simulation_usage import SimulationUsage
 
 router = APIRouter(prefix="/api/simulation", tags=["Simulation"])
+security = HTTPBearer(auto_error=False)
+
+# Free tier limits
+FREE_DAILY_SIMULATION_LIMIT = 10
 
 
 # ============ Request Models ============
@@ -38,15 +50,155 @@ class ComparisonRequest(BaseModel):
     portfolio_b: SimulationRequest
 
 
+class UsageResponse(BaseModel):
+    """Response for usage status."""
+    daily_simulations: int
+    daily_limit: int
+    remaining: int
+    is_premium: bool
+    reset_at: str  # UTC date string
+
+
+# ============ Helper Functions ============
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: AsyncSession = Depends(get_db)
+) -> Optional[User]:
+    """Get user if authenticated, None otherwise."""
+    if credentials is None:
+        return None
+    try:
+        user = await get_current_user(db, credentials.credentials)
+        return user
+    except:
+        return None
+
+
+async def check_and_update_usage(
+    db: AsyncSession,
+    user: Optional[User]
+) -> tuple[bool, int, int]:
+    """
+    Check if user can run simulation and update usage.
+    Returns: (can_run, current_count, limit)
+    """
+    if user is None:
+        # Anonymous users always blocked - must sign up
+        return False, 0, 0
+    
+    # Premium users have unlimited
+    if user.is_premium:
+        return True, 0, -1  # -1 means unlimited
+    
+    today = date.today()
+    
+    # Find or create usage record for today
+    stmt = select(SimulationUsage).where(
+        SimulationUsage.user_id == user.id,
+        SimulationUsage.usage_date == today
+    )
+    result = await db.execute(stmt)
+    usage = result.scalar_one_or_none()
+    
+    if usage is None:
+        # Create new record for today
+        usage = SimulationUsage(
+            user_id=user.id,
+            usage_date=today,
+            simulation_count=0
+        )
+        db.add(usage)
+    
+    # Check limit
+    if usage.simulation_count >= FREE_DAILY_SIMULATION_LIMIT:
+        return False, usage.simulation_count, FREE_DAILY_SIMULATION_LIMIT
+    
+    # Increment and save
+    usage.simulation_count += 1
+    usage.last_simulation_at = datetime.utcnow()
+    await db.commit()
+    
+    return True, usage.simulation_count, FREE_DAILY_SIMULATION_LIMIT
+
+
 # ============ Endpoints ============
 
+@router.get("/usage")
+async def get_usage_status(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get current simulation usage status for authenticated user."""
+    user = await get_optional_user(credentials, db)
+    
+    if user is None:
+        return UsageResponse(
+            daily_simulations=0,
+            daily_limit=FREE_DAILY_SIMULATION_LIMIT,
+            remaining=0,
+            is_premium=False,
+            reset_at=(date.today().isoformat())
+        )
+    
+    if user.is_premium:
+        return UsageResponse(
+            daily_simulations=0,
+            daily_limit=-1,  # Unlimited
+            remaining=-1,
+            is_premium=True,
+            reset_at=""
+        )
+    
+    today = date.today()
+    stmt = select(SimulationUsage).where(
+        SimulationUsage.user_id == user.id,
+        SimulationUsage.usage_date == today
+    )
+    result = await db.execute(stmt)
+    usage = result.scalar_one_or_none()
+    
+    current_count = usage.simulation_count if usage else 0
+    
+    return UsageResponse(
+        daily_simulations=current_count,
+        daily_limit=FREE_DAILY_SIMULATION_LIMIT,
+        remaining=max(0, FREE_DAILY_SIMULATION_LIMIT - current_count),
+        is_premium=False,
+        reset_at=today.isoformat()
+    )
+
+
 @router.post("/run")
-async def run_simulation(request: SimulationRequest):
+async def run_simulation(
+    request: SimulationRequest,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: AsyncSession = Depends(get_db)
+):
     """
     Run Monte Carlo simulation for a portfolio.
     
+    Requires authentication. Free users limited to 10 simulations/day.
     Returns probability distributions, risk metrics, and sample paths.
     """
+    # Get user (required for simulation)
+    user = await get_optional_user(credentials, db)
+    
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required to run simulations. Please sign up for a free account."
+        )
+    
+    # Check usage limits
+    can_run, current_count, limit = await check_and_update_usage(db, user)
+    
+    if not can_run:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily simulation limit reached ({limit}/day). Upgrade to Pro for unlimited simulations."
+        )
+    
     # Validate holdings sum to 100%
     total_allocation = sum(h.allocation for h in request.holdings)
     if abs(total_allocation - 100) > 0.01:

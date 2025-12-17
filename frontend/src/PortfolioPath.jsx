@@ -1667,9 +1667,18 @@ const PortfolioPath = () => {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
-                  <XAxis dataKey="day" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} />
-                  <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
-                  <Tooltip contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} />
+                  <XAxis 
+                    dataKey="day" 
+                    stroke={isDark ? '#71717a' : '#78716c'} 
+                    tick={{ fontSize: 10 }} 
+                    tickFormatter={(day) => day === 0 ? 'Now' : day >= 252 ? `${(day/252).toFixed(1)}y` : `${day}d`}
+                  />
+                  <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} tickFormatter={(v) => v >= 1000000 ? `$${(v/1000000).toFixed(1)}M` : `$${(v/1000).toFixed(0)}k`} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} 
+                    formatter={(value, name) => [`$${value.toLocaleString(undefined, {maximumFractionDigits: 0})}`, name]}
+                    labelFormatter={(day) => `Day ${day} (${(day/252).toFixed(2)} years)`}
+                  />
                   <Area type="monotone" dataKey="p90" stroke="#be123c" strokeWidth={1.5} fill="url(#coneGradient90)" name="90th %ile" />
                   <Area type="monotone" dataKey="p75" stroke="#e11d48" strokeWidth={1.5} fill="url(#coneGradient75)" name="75th %ile" />
                   <Area type="monotone" dataKey="p50" stroke="#f43f5e" strokeWidth={2.5} fill="url(#coneGradient50)" name="Median" />
@@ -1695,7 +1704,12 @@ const PortfolioPath = () => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
-                    <XAxis dataKey="day" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} />
+                    <XAxis 
+                      dataKey="day" 
+                      stroke={isDark ? '#71717a' : '#78716c'} 
+                      tick={{ fontSize: 10 }} 
+                      tickFormatter={(day) => day === 0 ? 'Now' : day >= 252 ? `${(day/252).toFixed(1)}y` : `${day}d`}
+                    />
                     <YAxis 
                       stroke={isDark ? '#71717a' : '#78716c'} 
                       tick={{ fontSize: 10 }} 
@@ -1705,7 +1719,8 @@ const PortfolioPath = () => {
                     />
                     <Tooltip 
                       contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(value) => [`-${value.toFixed(2)}%`, '']}
+                      formatter={(value, name) => [`-${value.toFixed(2)}%`, name]}
+                      labelFormatter={(day) => `Day ${day} (${(day/252).toFixed(2)} years)`}
                     />
                     <Area type="monotone" dataKey="worst" stroke="#dc2626" strokeWidth={1} fill="url(#drawdownGradient)" name="Worst Case" />
                     <Area type="monotone" dataKey="p90" stroke="#ef4444" strokeWidth={1.5} fill="none" name="90th %ile" strokeDasharray="3 3" />
@@ -1744,9 +1759,18 @@ const PortfolioPath = () => {
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={samplePathsData}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
-                <XAxis dataKey="day" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} />
-                <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
-                <Tooltip contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} />
+                <XAxis 
+                  dataKey="day" 
+                  stroke={isDark ? '#71717a' : '#78716c'} 
+                  tick={{ fontSize: 10 }} 
+                  tickFormatter={(day) => day === 0 ? 'Now' : day >= 252 ? `${(day/252).toFixed(1)}y` : `${day}d`}
+                />
+                <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} tickFormatter={(v) => v >= 1000000 ? `$${(v/1000000).toFixed(1)}M` : `$${(v/1000).toFixed(0)}k`} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} 
+                  formatter={(value, name) => [`$${value?.toLocaleString(undefined, {maximumFractionDigits: 0}) || 'N/A'}`, name]}
+                  labelFormatter={(day) => `Day ${day} (${(day/252).toFixed(2)} years)`}
+                />
                 <ReferenceLine y={initialValue} stroke="#71717a" strokeDasharray="3 3" label={{ value: 'Initial', fill: '#71717a', fontSize: 10 }} />
                 {goalAmount > 0 && <ReferenceLine y={goalAmount} stroke="#10b981" strokeDasharray="5 5" label={{ value: 'Goal', fill: '#10b981', fontSize: 10 }} />}
                 {[...Array(10)].map((_, i) => (
@@ -1755,9 +1779,10 @@ const PortfolioPath = () => {
                     type="monotone"
                     dataKey={`path${i}`}
                     stroke={`hsl(${355 - i * 8}, 70%, ${55 + i * 3}%)`}
-                    strokeWidth={1}
+                    strokeWidth={1.5}
                     dot={false}
                     name={`Sim ${i + 1}`}
+                    strokeOpacity={0.8}
                   />
                 ))}
               </LineChart>
@@ -1836,11 +1861,23 @@ const PortfolioPath = () => {
               <h3 className={`text-sm font-semibold mb-3 ${colors.text}`}>Final Value Distribution</h3>
               <ResponsiveContainer width="100%" height={180}>
                 <AreaChart data={distributionData}>
+                  <defs>
+                    <linearGradient id="distributionGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#e11d48" stopOpacity={0.5}/>
+                      <stop offset="95%" stopColor="#e11d48" stopOpacity={0.1}/>
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
-                  <XAxis dataKey="value" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 9 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
-                  <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 9 }} />
-                  <Tooltip contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} />
-                  <Area type="basis" dataKey="frequency" stroke="#e11d48" fill="#e11d48" fillOpacity={0.4} />
+                  <XAxis dataKey="value" stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 9 }} tickFormatter={(v) => v >= 1000000 ? `$${(v/1000000).toFixed(1)}M` : `$${(v/1000).toFixed(0)}k`} />
+                  <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 9 }} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} 
+                    formatter={(value) => [`${value.toFixed(1)}% of outcomes`, 'Frequency']}
+                    labelFormatter={(value) => `Portfolio Value: $${value.toLocaleString()}`}
+                  />
+                  <ReferenceLine x={initialValue} stroke="#71717a" strokeDasharray="3 3" label={{ value: 'Initial', fill: '#71717a', fontSize: 9, position: 'top' }} />
+                  {goalAmount > 0 && <ReferenceLine x={goalAmount} stroke="#10b981" strokeDasharray="3 3" label={{ value: 'Goal', fill: '#10b981', fontSize: 9, position: 'top' }} />}
+                  <Area type="basis" dataKey="frequency" stroke="#e11d48" strokeWidth={2} fill="url(#distributionGradient)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -1987,7 +2024,10 @@ const PortfolioPath = () => {
       <AccountSettings 
         isOpen={showAccountSettings} 
         onClose={() => setShowAccountSettings(false)}
-        isDark={isDark}
+        onUpgrade={() => {
+          setShowAccountSettings(false);
+          setShowPaymentModal(true);
+        }}
       />
     </>
   );

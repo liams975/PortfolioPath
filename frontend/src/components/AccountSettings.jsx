@@ -31,7 +31,7 @@ import { usePremium } from '../context/PremiumContext';
 import { useTheme } from '../context/ThemeContext';
 
 const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
-  const { user, logout, refreshUser } = useAuth();
+  const { user, logout, getPortfolios } = useAuth();
   const { isPremium, dailySimulations, FREE_SIMULATION_LIMIT } = usePremium();
   const { colors, isDark } = useTheme();
   
@@ -51,7 +51,6 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const { getPortfolios } = useAuth();
         const portfolios = await getPortfolios();
         setPortfolioCount(portfolios?.length || 0);
       } catch (e) {
@@ -61,7 +60,7 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
     if (isOpen && user) {
       fetchData();
     }
-  }, [isOpen, user]);
+  }, [isOpen, user, getPortfolios]);
 
   const handlePasswordChange = async (e) => {
     e.preventDefault();
