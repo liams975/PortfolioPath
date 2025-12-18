@@ -100,38 +100,45 @@ const TUTORIAL_STEPS = [
 
 // LocalStorage key for tracking tutorial completion
 const TUTORIAL_COMPLETED_KEY = 'portfoliopath_tutorial_completed';
-const TUTORIAL_DISMISSED_KEY = 'portfoliopath_tutorial_dismissed';
 
 /**
- * Check if user has completed or dismissed the tutorial
+ * Check if user has completed the tutorial
  */
-export const shouldShowTutorial = () => {
-  const completed = localStorage.getItem(TUTORIAL_COMPLETED_KEY);
-  const dismissed = localStorage.getItem(TUTORIAL_DISMISSED_KEY);
-  return !completed && !dismissed;
+export const shouldShowTutorial = (userId) => {
+  if (!userId) return false;
+  const completedUsers = JSON.parse(localStorage.getItem(TUTORIAL_COMPLETED_KEY) || '[]');
+  return !completedUsers.includes(userId);
 };
 
 /**
- * Mark tutorial as completed
+ * Mark tutorial as completed for a specific user
  */
-export const markTutorialComplete = () => {
-  localStorage.setItem(TUTORIAL_COMPLETED_KEY, 'true');
+export const markTutorialComplete = (userId) => {
+  if (!userId) return;
+  const completedUsers = JSON.parse(localStorage.getItem(TUTORIAL_COMPLETED_KEY) || '[]');
+  if (!completedUsers.includes(userId)) {
+    completedUsers.push(userId);
+    localStorage.setItem(TUTORIAL_COMPLETED_KEY, JSON.stringify(completedUsers));
+  }
 };
 
 /**
- * Reset tutorial (for "restart tour" feature)
+ * Reset tutorial for a specific user (for "restart tour" feature)
  */
-export const resetTutorial = () => {
-  localStorage.removeItem(TUTORIAL_COMPLETED_KEY);
-  localStorage.removeItem(TUTORIAL_DISMISSED_KEY);
+export const resetTutorial = (userId) => {
+  if (!userId) return;
+  const completedUsers = JSON.parse(localStorage.getItem(TUTORIAL_COMPLETED_KEY) || '[]');
+  const filtered = completedUsers.filter(id => id !== userId);
+  localStorage.setItem(TUTORIAL_COMPLETED_KEY, JSON.stringify(filtered));
 };
 
 /**
  * Main Onboarding Tutorial Component
  */
-const OnboardingTutorial = ({ isOpen, onClose, isDark = true }) => {
+const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [highlightedElement, setHighlightedElement] = useState(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
   const colors = isDark ? {
     bg: 'bg-zinc-900',
@@ -170,34 +177,44 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true }) => {
   }, [currentStep, step.highlight]);
 
   const handleNext = useCallback(() => {
+    if (isTransitioning) return;
     if (isLastStep) {
-      markTutorialComplete();
+      markTutorialComplete(userId);
       onClose();
     } else {
-      setCurrentStep(prev => prev + 1);
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setCurrentStep(prev => prev + 1);
+        setIsTransitioning(false);
+      }, 100);
     }
-  }, [isLastStep, onClose]);
+  }, [isLastStep, onClose, userId, isTransitioning]);
 
   const handlePrev = useCallback(() => {
+    if (isTransitioning) return;
     if (!isFirstStep) {
-      setCurrentStep(prev => prev - 1);
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setCurrentStep(prev => prev - 1);
+        setIsTransitioning(false);
+      }, 100);
     }
-  }, [isFirstStep]);
+  }, [isFirstStep, isTransitioning]);
 
-  const handleSkip = useCallback(() => {
-    localStorage.setItem(TUTORIAL_DISMISSED_KEY, 'true');
+  // Remove skip handler - users must complete the tutorial
+  const handleComplete = useCallback(() => {
+    markTutorialComplete(userId);
     onClose();
-  }, [onClose]);
+  }, [onClose, userId]);
 
   const handleKeyDown = useCallback((e) => {
-    if (e.key === 'Escape') {
-      handleSkip();
-    } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+    if (e.key === 'ArrowRight' || e.key === 'Enter') {
       handleNext();
     } else if (e.key === 'ArrowLeft') {
       handlePrev();
     }
-  }, [handleSkip, handleNext, handlePrev]);
+    // Remove Escape key handling - can't skip tutorial
+  }, [handleNext, handlePrev]);
 
   useEffect(() => {
     if (isOpen) {
@@ -261,11 +278,8 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true }) => {
         exit={{ opacity: 0 }}
         className="fixed inset-0 z-[100]"
       >
-        {/* Dark overlay with spotlight effect */}
-        <div 
-          className="absolute inset-0 bg-black/80"
-          onClick={handleSkip}
-        />
+        {/* Dark overlay - not clickable */}
+        <div className="absolute inset-0 bg-black/80" />
 
         {/* Highlight ring around target element */}
         {highlightedElement && (
@@ -309,12 +323,11 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true }) => {
             </p>
           </div>
 
-          {/* Progress Dots */}
+          {/* Progress Dots - not clickable */}
           <div className="flex items-center justify-center gap-1.5 mb-6">
             {TUTORIAL_STEPS.map((_, idx) => (
-              <button
+              <div
                 key={idx}
-                onClick={() => setCurrentStep(idx)}
                 className={`w-2 h-2 rounded-full transition-all ${
                   idx === currentStep 
                     ? 'bg-rose-500 w-6' 
@@ -326,16 +339,8 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true }) => {
             ))}
           </div>
 
-          {/* Navigation Buttons */}
-          <div className="flex items-center justify-between gap-3">
-            <button
-              onClick={handleSkip}
-              className={`px-4 py-2 text-sm ${colors.textMuted} hover:${colors.text} transition-colors`}
-            >
-              Skip Tour
-            </button>
-            
-            <div className="flex items-center gap-2">
+          {/* Navigation Buttons - no skip option */}
+          <div className="flex items-center justify-center gap-3">
               {!isFirstStep && (
                 <button
                   onClick={handlePrev}
@@ -348,17 +353,17 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true }) => {
               
               <button
                 onClick={handleNext}
-                className={`px-6 py-2 bg-gradient-to-r ${colors.accent} rounded-lg flex items-center gap-1 text-sm text-white font-medium hover:opacity-90 transition-opacity`}
+                disabled={isTransitioning}
+                className={`px-6 py-2 bg-gradient-to-r ${colors.accent} rounded-lg flex items-center gap-1 text-sm text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50`}
               >
                 {isLastStep ? 'Get Started' : 'Next'}
                 {!isLastStep && <ChevronRight className="w-4 h-4" />}
               </button>
-            </div>
           </div>
 
           {/* Keyboard hints */}
           <p className={`text-xs ${colors.textMuted} text-center mt-4`}>
-            Use ← → arrows or Esc to navigate
+            Use ← → arrows to navigate
           </p>
         </motion.div>
       </motion.div>
@@ -368,25 +373,33 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true }) => {
 
 /**
  * Hook to manage tutorial state
+ * Only shows tutorial on first-time registration
  */
-export const useTutorial = () => {
+export const useTutorial = (userId) => {
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
-    // Show tutorial for first-time users after a short delay
-    const timer = setTimeout(() => {
-      if (shouldShowTutorial()) {
+    // Check if user just registered (set by AuthGate/AuthModal on successful registration)
+    const justRegistered = sessionStorage.getItem('portfoliopath_just_registered') === 'true';
+    
+    // Only show tutorial for new users who just registered and haven't seen it yet
+    if (userId && justRegistered && shouldShowTutorial(userId)) {
+      // Clear the registration flag immediately
+      sessionStorage.removeItem('portfoliopath_just_registered');
+      
+      const timer = setTimeout(() => {
         setShowTutorial(true);
-      }
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, []);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [userId]);
 
   const startTutorial = useCallback(() => {
-    resetTutorial();
-    setShowTutorial(true);
-  }, []);
+    if (userId) {
+      resetTutorial(userId);
+      setShowTutorial(true);
+    }
+  }, [userId]);
 
   const closeTutorial = useCallback(() => {
     setShowTutorial(false);

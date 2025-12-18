@@ -64,7 +64,8 @@ export const AuthProvider = ({ children }) => {
       const userData = await apiGetCurrentUser();
       setUser(userData);
 
-      return { success: true };
+      // Return success with isNewUser flag for tutorial trigger
+      return { success: true, isNewUser: true, userId: userData.id };
     } catch (error) {
       return { success: false, error: error.message };
     }

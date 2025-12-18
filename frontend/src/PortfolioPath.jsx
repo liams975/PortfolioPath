@@ -126,8 +126,8 @@ const PortfolioPath = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   
-  // Onboarding tutorial
-  const { showTutorial, startTutorial, closeTutorial } = useTutorial();
+  // Onboarding tutorial - pass user.id to track per-user tutorial completion
+  const { showTutorial, startTutorial, closeTutorial } = useTutorial(user?.id);
   
   // Premium/Pro tier status
   const { 
@@ -1315,6 +1315,7 @@ const PortfolioPath = () => {
           isOpen={showTutorial}
           onClose={closeTutorial}
           isDark={isDark}
+          userId={user?.id}
         />
       </div>
     );

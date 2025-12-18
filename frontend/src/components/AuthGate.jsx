@@ -97,6 +97,11 @@ const AuthGate = ({ children }) => {
           return;
         }
         result = await register(email, password, name);
+        
+        // Set a flag for new user registration (for tutorial)
+        if (result.success && result.isNewUser) {
+          sessionStorage.setItem('portfoliopath_just_registered', 'true');
+        }
       }
 
       if (result.success) {
