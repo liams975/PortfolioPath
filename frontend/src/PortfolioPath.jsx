@@ -112,6 +112,7 @@ const PortfolioPath = () => {
   const [showSavedPortfolios, setShowSavedPortfolios] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   
   // Onboarding tutorial - pass user.id to track per-user tutorial completion
   const { showTutorial, startTutorial: _startTutorial, closeTutorial } = useTutorial(user?.id);
@@ -762,39 +763,18 @@ const PortfolioPath = () => {
           </div>
         )}
         <div className="max-w-6xl mx-auto" style={{ marginTop: !backendConnected ? '3rem' : '0' }}>
-          {/* Header with Auth and Theme Toggle */}
+          {/* Header */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">
-              {/* Theme Toggle */}
-              <button
-                onClick={toggleTheme}
-                className={`p-2 ${colors.buttonSecondary} rounded-lg transition-all border`}
-                title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
-              </button>
+              {/* Pro Badge - only show when authenticated and premium */}
+              {isAuthenticated && isPremium && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg">
+                  <Crown className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-semibold text-amber-400">PRO</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
-              {isAuthenticated && (
-                <>
-                  {/* Pro Badge / Upgrade Button - before Compare */}
-                  {isPremium ? (
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg">
-                      <Crown className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs font-semibold text-amber-400">PRO</span>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowPaymentModal(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-600 hover:to-red-600 rounded-lg transition-all shadow-lg shadow-rose-900/30"
-                    >
-                      <Star className="w-4 h-4 text-white" />
-                      <span className="text-xs font-semibold text-white">Upgrade</span>
-                    </button>
-                  )}
-                </>
-              )}
-              
               {/* Comparison Mode Toggle */}
               <button
                 data-tour="compare"
@@ -814,18 +794,104 @@ const PortfolioPath = () => {
                     <FolderOpen className={`w-4 h-4 ${colors.accent}`} />
                     <span className={colors.textMuted}>Portfolios</span>
                   </button>
-                  <button 
-                    onClick={() => setShowAccountSettings(true)}
-                    className={`flex items-center gap-2 px-4 py-2 ${colors.card} rounded-lg border hover:border-rose-500/50 transition-all cursor-pointer`}
-                    title="Account Settings"
-                  >
-                    <User className={`w-4 h-4 ${colors.accent}`} />
-                    <span className={`text-sm ${colors.textMuted}`}>{user?.full_name || user?.username || user?.email?.split('@')[0] || 'Profile'}</span>
-                    <Settings className={`w-3 h-3 ${colors.textSubtle}`} />
-                  </button>
-                  <button onClick={logout} className={`p-2 ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'} rounded-lg transition-all`} title="Logout">
-                    <LogOut className={`w-4 h-4 ${colors.textMuted} hover:text-rose-400`} />
-                  </button>
+                  
+                  {/* Profile Button with Dropdown */}
+                  <div className="relative">
+                    <button 
+                      onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                      className={`flex items-center gap-2 px-4 py-2 ${colors.card} rounded-lg border ${showProfileDropdown ? 'border-rose-500/50' : ''} hover:border-rose-500/50 transition-all cursor-pointer`}
+                    >
+                      <User className={`w-4 h-4 ${colors.accent}`} />
+                      <span className={`text-sm ${colors.textMuted}`}>{user?.full_name || user?.username || user?.email?.split('@')[0] || 'Profile'}</span>
+                    </button>
+                    
+                    {/* Profile Dropdown */}
+                    {showProfileDropdown && (
+                      <>
+                        {/* Backdrop to close dropdown */}
+                        <div 
+                          className="fixed inset-0 z-40" 
+                          onClick={() => setShowProfileDropdown(false)}
+                        />
+                        <div className={`absolute right-0 top-full mt-2 w-64 ${colors.card} ${colors.border} border rounded-xl shadow-2xl z-50 overflow-hidden`}>
+                          {/* User Info Header */}
+                          <div className={`p-4 border-b ${colors.border} ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'}`}>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center text-white font-semibold`}>
+                                {(user?.full_name || user?.username || user?.email || 'U')[0].toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`font-medium ${colors.text} truncate`}>
+                                  {user?.full_name || user?.username || 'User'}
+                                </p>
+                                <p className={`text-xs ${colors.textMuted} truncate`}>
+                                  {user?.email}
+                                </p>
+                              </div>
+                            </div>
+                            {isPremium && (
+                              <div className="mt-2 flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg w-fit">
+                                <Crown className="w-3 h-3 text-amber-400" />
+                                <span className="text-xs font-semibold text-amber-400">PRO Member</span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Menu Items */}
+                          <div className="p-2">
+                            <button
+                              onClick={() => {
+                                setShowProfileDropdown(false);
+                                setShowAccountSettings(true);
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
+                            >
+                              <Settings className={`w-4 h-4 ${colors.textMuted}`} />
+                              <span className={`text-sm ${colors.text}`}>Settings</span>
+                            </button>
+                            
+                            <button
+                              onClick={() => {
+                                setShowProfileDropdown(false);
+                                toggleTheme();
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
+                            >
+                              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+                              <span className={`text-sm ${colors.text}`}>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+                            </button>
+                            
+                            {!isPremium && (
+                              <button
+                                onClick={() => {
+                                  setShowProfileDropdown(false);
+                                  setShowPaymentModal(true);
+                                }}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
+                              >
+                                <Star className="w-4 h-4 text-rose-400" />
+                                <span className={`text-sm ${colors.text}`}>Upgrade to Pro</span>
+                              </button>
+                            )}
+                          </div>
+                          
+                          {/* Logout */}
+                          <div className={`p-2 border-t ${colors.border}`}>
+                            <button
+                              onClick={() => {
+                                setShowProfileDropdown(false);
+                                logout();
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-red-500/10 transition-all text-left`}
+                            >
+                              <LogOut className="w-4 h-4 text-red-400" />
+                              <span className="text-sm text-red-400">Log Out</span>
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </>
               ) : (
                 <button

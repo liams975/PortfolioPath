@@ -372,23 +372,20 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
 
 /**
  * Hook to manage tutorial state
- * Only shows tutorial on first-time registration
+ * Shows tutorial for any user who hasn't completed it yet
  */
 export const useTutorial = (userId) => {
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
-    // Check if user just registered (set by AuthGate/AuthModal on successful registration)
-    const justRegistered = sessionStorage.getItem('portfoliopath_just_registered') === 'true';
+    if (!userId) return;
     
-    // Only show tutorial for new users who just registered and haven't seen it yet
-    if (userId && justRegistered && shouldShowTutorial(userId)) {
-      // Clear the registration flag immediately
-      sessionStorage.removeItem('portfoliopath_just_registered');
-      
+    // Check if this user has completed the tutorial
+    // Show tutorial for ANY user who hasn't completed it
+    if (shouldShowTutorial(userId)) {
       const timer = setTimeout(() => {
         setShowTutorial(true);
-      }, 500);
+      }, 800); // Small delay to let the UI settle
       return () => clearTimeout(timer);
     }
   }, [userId]);

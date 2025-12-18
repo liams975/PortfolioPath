@@ -41,7 +41,7 @@ const SavedPortfolios = ({ onLoadPortfolio, currentPortfolio, onClose }) => {
         ...currentPortfolio
       });
 
-      if (result.success) {
+      if (result && (result.success || result.id)) {
         setShowSaveDialog(false);
         setPortfolioName('');
         setSaveError('');
@@ -49,7 +49,7 @@ const SavedPortfolios = ({ onLoadPortfolio, currentPortfolio, onClose }) => {
         const portfolios = await getPortfolios();
         setSavedPortfolios(portfolios || []);
       } else {
-        setSaveError(result.error || 'Failed to save portfolio');
+        setSaveError(result?.error || 'Failed to save portfolio');
       }
     } catch (error) {
       setSaveError(error.message || 'Failed to save portfolio');
