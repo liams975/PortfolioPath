@@ -136,7 +136,7 @@ export const resetTutorial = (userId) => {
  */
 const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [highlightedElement, setHighlightedElement] = useState(null);
+  const [highlightRect, setHighlightRect] = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   const colors = isDark ? {
@@ -159,21 +159,34 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === TUTORIAL_STEPS.length - 1;
 
-  // Update highlighted element when step changes
+  // Update highlighted element rect when step changes
   useEffect(() => {
-    if (step.highlight) {
-      const element = document.querySelector(step.highlight);
-      if (element) {
-        setHighlightedElement(element);
-        // Scroll element into view
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!isOpen) return;
+    
+    const updateHighlight = () => {
+      if (step.highlight) {
+        const element = document.querySelector(step.highlight);
+        if (element) {
+          const rect = element.getBoundingClientRect();
+          setHighlightRect({
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          });
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          setHighlightRect(null);
+        }
       } else {
-        setHighlightedElement(null);
+        setHighlightRect(null);
       }
-    } else {
-      setHighlightedElement(null);
-    }
-  }, [currentStep, step.highlight]);
+    };
+
+    // Small delay to let DOM settle after step change
+    const timer = setTimeout(updateHighlight, 150);
+    return () => clearTimeout(timer);
+  }, [currentStep, step.highlight, isOpen]);
 
   const handleNext = useCallback(() => {
     if (isTransitioning) return;
@@ -228,7 +241,7 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
 
   // Calculate tooltip position based on highlighted element
   const getTooltipPosition = () => {
-    if (!highlightedElement || step.position === 'center') {
+    if (!highlightRect || step.position === 'center') {
       return {
         position: 'fixed',
         top: '50%',
@@ -237,30 +250,29 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
       };
     }
 
-    const rect = highlightedElement.getBoundingClientRect();
     const positions = {
       top: {
         position: 'fixed',
-        top: `${rect.top - 16}px`,
-        left: `${rect.left + rect.width / 2}px`,
+        top: `${highlightRect.top - 16}px`,
+        left: `${highlightRect.left + highlightRect.width / 2}px`,
         transform: 'translate(-50%, -100%)',
       },
       bottom: {
         position: 'fixed',
-        top: `${rect.bottom + 16}px`,
-        left: `${rect.left + rect.width / 2}px`,
+        top: `${highlightRect.top + highlightRect.height + 16}px`,
+        left: `${highlightRect.left + highlightRect.width / 2}px`,
         transform: 'translateX(-50%)',
       },
       left: {
         position: 'fixed',
-        top: `${rect.top + rect.height / 2}px`,
-        left: `${rect.left - 16}px`,
+        top: `${highlightRect.top + highlightRect.height / 2}px`,
+        left: `${highlightRect.left - 16}px`,
         transform: 'translate(-100%, -50%)',
       },
       right: {
         position: 'fixed',
-        top: `${rect.top + rect.height / 2}px`,
-        left: `${rect.right + 16}px`,
+        top: `${highlightRect.top + highlightRect.height / 2}px`,
+        left: `${highlightRect.left + highlightRect.width + 16}px`,
         transform: 'translateY(-50%)',
       },
     };
@@ -281,16 +293,17 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
         <div className="absolute inset-0 bg-black/80" />
 
         {/* Highlight ring around target element */}
-        {highlightedElement && (
+        {highlightRect && (
           <motion.div
+            key={currentStep}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="absolute pointer-events-none"
             style={{
-              top: highlightedElement.getBoundingClientRect().top - 8,
-              left: highlightedElement.getBoundingClientRect().left - 8,
-              width: highlightedElement.getBoundingClientRect().width + 16,
-              height: highlightedElement.getBoundingClientRect().height + 16,
+              top: highlightRect.top - 8,
+              left: highlightRect.left - 8,
+              width: highlightRect.width + 16,
+              height: highlightRect.height + 16,
               borderRadius: '12px',
               boxShadow: '0 0 0 4px rgba(244, 63, 94, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.8)',
             }}
