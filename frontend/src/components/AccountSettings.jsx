@@ -31,7 +31,7 @@ import { usePremium } from '../context/PremiumContext';
 import { useTheme } from '../context/ThemeContext';
 
 const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
-  const { user, logout, getPortfolios, updateProfile } = useAuth();
+  const { user, logout, getPortfolios } = useAuth();
   const { isPremium, dailySimulations, FREE_SIMULATION_LIMIT } = usePremium();
   const { colors, isDark, toggleTheme } = useTheme();
   
@@ -41,7 +41,7 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
 
   // Profile state
   const [portfolioCount, setPortfolioCount] = useState(0);
-  const [displayName, setDisplayName] = useState(user?.name || user?.username || '');
+  const [displayName, setDisplayName] = useState('');
   const [defaultTimeHorizon, setDefaultTimeHorizon] = useState(localStorage.getItem('defaultTimeHorizon') || '1');
   const [defaultSimulations, setDefaultSimulations] = useState(localStorage.getItem('defaultSimulations') || '1000');
   
@@ -49,6 +49,13 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Update displayName when user changes
+  useEffect(() => {
+    if (user) {
+      setDisplayName(user.name || user.username || '');
+    }
+  }, [user]);
 
   // Fetch portfolio count
   useEffect(() => {
@@ -79,9 +86,8 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
     }
     setLoading(true);
     try {
-      if (updateProfile) {
-        await updateProfile({ name: displayName });
-      }
+      // Store display name locally for now
+      localStorage.setItem('userDisplayName', displayName);
       setMessage({ type: 'success', text: 'Profile updated successfully' });
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Failed to update profile' });

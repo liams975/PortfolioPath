@@ -781,11 +781,15 @@ const PortfolioPath = () => {
             <div className="flex items-center gap-3">
               {/* API Connection Indicator */}
               <div 
-                className={`flex items-center gap-2 px-3 py-2 ${colors.card} ${colors.border} rounded-lg`}
-                title={backendConnected ? 'API Connected' : 'API Disconnected'}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                  backendConnected 
+                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' 
+                    : 'bg-red-500/10 border border-red-500/30 text-red-400'
+                }`}
+                title={backendConnected ? 'Connected to server' : 'Server offline - using local simulation'}
               >
-                <div className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-                <span className={`text-xs ${colors.textMuted}`}>{backendConnected ? 'API Online' : 'API Offline'}</span>
+                <span className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+                {backendConnected ? 'Live Data' : 'Offline Mode'}
               </div>
               {/* Theme Toggle */}
               <button
@@ -1382,10 +1386,16 @@ const PortfolioPath = () => {
   // ============================================================================
   
   if (view === 'results' && simulationResults && riskMetrics) {
-    // Calculate dynamic percentile value
+    // Calculate dynamic percentile value from simulation paths
     const dynamicPercentileValue = (() => {
-      if (!simulationResults?.finalValues) return null;
-      const sorted = [...simulationResults.finalValues].sort((a, b) => a - b);
+      if (!simulationResults || simulationResults.length === 0) return null;
+      // Extract final values from each path
+      const finalVals = simulationResults.map(path => {
+        const lastPoint = path[path.length - 1];
+        return lastPoint ? lastPoint.value : null;
+      }).filter(v => v !== null);
+      if (finalVals.length === 0) return null;
+      const sorted = [...finalVals].sort((a, b) => a - b);
       const idx = Math.floor((selectedPercentile / 100) * sorted.length);
       return sorted[Math.min(idx, sorted.length - 1)];
     })();
