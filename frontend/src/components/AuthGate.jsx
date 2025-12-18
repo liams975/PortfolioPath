@@ -29,7 +29,7 @@ const AuthGate = ({ children }) => {
   const { isAuthenticated, loading: authLoading, login, register } = useAuth();
   const { colors, isDark } = useTheme();
   
-  const [mode, setMode] = useState('login'); // 'login', 'register', 'landing'
+  const [mode, setMode] = useState('landing'); // 'login', 'register', 'landing'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -176,17 +176,56 @@ const AuthGate = ({ children }) => {
           </div>
 
           {/* Free Tier Info */}
-          <div className={`mt-12 ${colors.card} ${colors.border} rounded-xl p-6 max-w-2xl mx-auto`}>
-            <h3 className={`font-semibold mb-4 flex items-center gap-2 ${colors.text}`}>
-              <Star className="w-5 h-5 text-amber-400" />
-              Free Account Includes
-            </h3>
-            <ul className={`grid grid-cols-2 gap-2 text-sm ${colors.textMuted}`}>
-              <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> 10 simulations/day</li>
-              <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> 3 saved portfolios</li>
-              <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> Basic risk metrics</li>
-              <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> Goal probability</li>
-            </ul>
+          <div className={`mt-12 grid md:grid-cols-2 gap-6 max-w-4xl mx-auto`}>
+            {/* Free Plan */}
+            <div className={`${colors.card} ${colors.border} rounded-xl p-6`}>
+              <h3 className={`font-semibold mb-4 flex items-center gap-2 ${colors.text}`}>
+                <Star className="w-5 h-5 text-zinc-400" />
+                Free Plan
+              </h3>
+              <p className={`text-2xl font-bold mb-4 ${colors.text}`}>$0<span className="text-sm font-normal text-zinc-500">/forever</span></p>
+              <ul className={`space-y-2 text-sm ${colors.textMuted}`}>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> 10 simulations/day</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> 3 saved portfolios</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> Basic risk metrics</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> Goal probability calculator</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-400" /> Real market data</li>
+              </ul>
+              <button
+                onClick={() => setMode('register')}
+                className={`w-full mt-6 py-3 ${colors.card} ${colors.border} rounded-lg font-medium transition-all hover:border-rose-500/50`}
+              >
+                Get Started Free
+              </button>
+            </div>
+
+            {/* Pro Plan */}
+            <div className={`${colors.card} border-2 border-rose-500/50 rounded-xl p-6 relative overflow-hidden`}>
+              <div className="absolute top-0 right-0 bg-gradient-to-l from-rose-500 to-red-500 text-white text-xs font-bold px-4 py-1 rounded-bl-lg">
+                RECOMMENDED
+              </div>
+              <h3 className={`font-semibold mb-4 flex items-center gap-2 ${colors.text}`}>
+                <Star className="w-5 h-5 text-amber-400" />
+                Pro Plan
+              </h3>
+              <p className={`text-2xl font-bold mb-4 ${colors.text}`}>$9.99<span className="text-sm font-normal text-zinc-500">/month</span></p>
+              <ul className={`space-y-2 text-sm ${colors.textMuted}`}>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> <span className="text-rose-400 font-medium">Unlimited</span> simulations</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> <span className="text-rose-400 font-medium">Unlimited</span> saved portfolios</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> Advanced models (GARCH, regime switching)</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> Efficient frontier analysis</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> PDF & CSV export</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> Stress testing scenarios</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> Correlation matrix</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-rose-400" /> Priority support</li>
+              </ul>
+              <button
+                onClick={() => setMode('register')}
+                className="w-full mt-6 py-3 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 rounded-lg font-medium text-white transition-all shadow-lg shadow-rose-900/30"
+              >
+                Start Free, Upgrade Anytime
+              </button>
+            </div>
           </div>
         </div>
       </div>
