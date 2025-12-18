@@ -299,3 +299,60 @@ async def logout(current_user: User = Depends(get_current_active_user)):
     # 2. Revoke refresh tokens
     # For now, just return success
     return MessageResponse(message="Logged out successfully")
+
+
+# ============ Admin Endpoints ============
+
+class AdminUserResponse(BaseModel):
+    """Response model for admin user listing."""
+    id: int
+    email: str
+    username: str
+    full_name: Optional[str]
+    is_active: bool
+    is_verified: bool
+    is_premium: bool
+    created_at: datetime
+    last_login: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
+
+
+class AdminUsersListResponse(BaseModel):
+    """Response model for list of users."""
+    total_users: int
+    users: list[AdminUserResponse]
+
+
+@router.get("/admin/users", response_model=AdminUsersListResponse)
+async def admin_list_users(
+    admin_key: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Admin endpoint to list all users.
+    
+    Requires admin_key query parameter for authentication.
+    Example: /api/auth/admin/users?admin_key=your_secret_key
+    
+    Set ADMIN_SECRET_KEY in your environment variables.
+    """
+    # Simple admin authentication via secret key
+    expected_key = getattr(settings, 'ADMIN_SECRET_KEY', 'portfoliopath_admin_2024')
+    
+    if admin_key != expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin key"
+        )
+    
+    # Fetch all users
+    from sqlalchemy import select
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    users = result.scalars().all()
+    
+    return AdminUsersListResponse(
+        total_users=len(users),
+        users=[AdminUserResponse.model_validate(u) for u in users]
+    )

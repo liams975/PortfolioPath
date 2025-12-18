@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your-super-secret-key-change-this-in-production"  # MUST be set via environment variable in production
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ADMIN_SECRET_KEY: str = "portfoliopath_admin_2024"  # Admin API access key
     
     # Rate Limiting
     RATE_LIMIT_ENABLED: bool = True
