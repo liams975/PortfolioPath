@@ -45,7 +45,7 @@ const AuthGate = ({ children }) => {
       setEmail('');
       setPassword('');
       setName('');
-      setMode('login');
+      setMode('landing'); // Reset to landing page, not login
       setLoading(false);
     }
   }, [isAuthenticated, authLoading]);
