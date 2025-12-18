@@ -458,11 +458,17 @@ const PortfolioPath = () => {
 
   const getCurrentPortfolioData = () => ({
     portfolio,
+    holdings: portfolio, // API expects holdings
+    initialInvestment: initialValue,
     initialValue,
     timeHorizon,
     numSimulations,
     advancedOptions,
-    scenarios
+    scenarios,
+    simulationConfig: {
+      numSimulations,
+      ...advancedOptions
+    }
   });
 
   const riskMetrics = useMemo(() => {
@@ -759,18 +765,6 @@ const PortfolioPath = () => {
           {/* Header with Auth and Theme Toggle */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">
-              {/* API Connection Indicator */}
-              <div 
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                  backendConnected 
-                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' 
-                    : 'bg-red-500/10 border border-red-500/30 text-red-400'
-                }`}
-                title={backendConnected ? 'Connected to server' : 'Server offline - using local simulation'}
-              >
-                <span className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-                {backendConnected ? 'Live Data' : 'Offline Mode'}
-              </div>
               {/* Theme Toggle */}
               <button
                 onClick={toggleTheme}
@@ -781,19 +775,9 @@ const PortfolioPath = () => {
               </button>
             </div>
             <div className="flex items-center gap-2">
-              {/* Comparison Mode Toggle */}
-              <button
-                data-tour="compare"
-                onClick={() => setComparisonMode(!comparisonMode)}
-                className={`px-4 py-2 ${comparisonMode ? 'bg-blue-600 border-blue-500' : colors.buttonSecondary} rounded-lg transition-all border flex items-center gap-2 text-sm`}
-              >
-                <GitCompare className={`w-4 h-4 ${comparisonMode ? 'text-white' : colors.accent}`} />
-                <span className={comparisonMode ? 'text-white' : colors.textMuted}>Compare</span>
-              </button>
-              
-              {isAuthenticated ? (
+              {isAuthenticated && (
                 <>
-                  {/* Pro Badge / Upgrade Button */}
+                  {/* Pro Badge / Upgrade Button - before Compare */}
                   {isPremium ? (
                     <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg">
                       <Crown className="w-4 h-4 text-amber-400" />
@@ -808,7 +792,21 @@ const PortfolioPath = () => {
                       <span className="text-xs font-semibold text-white">Upgrade</span>
                     </button>
                   )}
-                  
+                </>
+              )}
+              
+              {/* Comparison Mode Toggle */}
+              <button
+                data-tour="compare"
+                onClick={() => setComparisonMode(!comparisonMode)}
+                className={`px-4 py-2 ${comparisonMode ? 'bg-blue-600 border-blue-500' : colors.buttonSecondary} rounded-lg transition-all border flex items-center gap-2 text-sm`}
+              >
+                <GitCompare className={`w-4 h-4 ${comparisonMode ? 'text-white' : colors.accent}`} />
+                <span className={comparisonMode ? 'text-white' : colors.textMuted}>Compare</span>
+              </button>
+              
+              {isAuthenticated ? (
+                <>
                   <button
                     onClick={() => setShowSavedPortfolios(!showSavedPortfolios)}
                     className={`px-4 py-2 ${colors.card} rounded-lg transition-all border flex items-center gap-2 text-sm`}
@@ -822,7 +820,7 @@ const PortfolioPath = () => {
                     title="Account Settings"
                   >
                     <User className={`w-4 h-4 ${colors.accent}`} />
-                    <span className={`text-sm ${colors.textMuted}`}>{user.name}</span>
+                    <span className={`text-sm ${colors.textMuted}`}>{user?.full_name || user?.username || user?.email?.split('@')[0] || 'Profile'}</span>
                     <Settings className={`w-3 h-3 ${colors.textSubtle}`} />
                   </button>
                   <button onClick={logout} className={`p-2 ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'} rounded-lg transition-all`} title="Logout">

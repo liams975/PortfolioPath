@@ -53,7 +53,7 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
   // Update displayName when user changes
   useEffect(() => {
     if (user) {
-      setDisplayName(user.name || user.username || '');
+      setDisplayName(user.full_name || user.username || user.email?.split('@')[0] || '');
     }
   }, [user]);
 
