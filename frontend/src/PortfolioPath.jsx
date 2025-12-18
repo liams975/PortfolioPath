@@ -761,48 +761,6 @@ const PortfolioPath = () => {
           {/* Header with Auth and Theme Toggle */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">
-              {/* Backend Connection Status */}
-              {backendConnected ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                  <span className={`text-xs text-emerald-400 font-mono`}>CONNECTED</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                  <span className={`text-xs text-red-400 font-mono`}>OFFLINE</span>
-                </div>
-              )}
-              
-              {/* Market Data Status Indicator */}
-              {backendConnected && (
-                <div className="flex items-center gap-2 ml-2">
-                  {marketDataLoading ? (
-                    <div className="flex items-center gap-1">
-                      <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
-                      <span className="text-xs text-blue-400 font-mono">FETCHING...</span>
-                    </div>
-                  ) : Object.keys(marketData || {}).length > 0 ? (
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                      <span className="text-xs text-green-400 font-mono">MARKET DATA</span>
-                      <button
-                        onClick={refreshMarketData}
-                        className={`p-1 ${colors.buttonSecondary} rounded transition-all hover:scale-105`}
-                        title="Refresh market data"
-                      >
-                        <RefreshCw className="w-3 h-3 text-green-400" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                      <span className="text-xs text-yellow-400 font-mono">STATIC DATA</span>
-                    </div>
-                  )}
-                </div>
-              )}
-              
               {/* Theme Toggle */}
               <button
                 onClick={toggleTheme}
@@ -848,16 +806,14 @@ const PortfolioPath = () => {
                     <FolderOpen className={`w-4 h-4 ${colors.accent}`} />
                     <span className={colors.textMuted}>Portfolios</span>
                   </button>
-                  <div className={`flex items-center gap-2 px-4 py-2 ${colors.card} rounded-lg border`}>
-                    <User className={`w-4 h-4 ${colors.accent}`} />
-                    <span className={`text-sm ${colors.textMuted}`}>{user.name}</span>
-                  </div>
                   <button 
-                    onClick={() => setShowAccountSettings(true)} 
-                    className={`p-2 ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'} rounded-lg transition-all`} 
+                    onClick={() => setShowAccountSettings(true)}
+                    className={`flex items-center gap-2 px-4 py-2 ${colors.card} rounded-lg border hover:border-rose-500/50 transition-all cursor-pointer`}
                     title="Account Settings"
                   >
-                    <Settings className={`w-4 h-4 ${colors.textMuted} hover:${colors.accent}`} />
+                    <User className={`w-4 h-4 ${colors.accent}`} />
+                    <span className={`text-sm ${colors.textMuted}`}>{user.name}</span>
+                    <Settings className={`w-3 h-3 ${colors.textSubtle}`} />
                   </button>
                   <button onClick={logout} className={`p-2 ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'} rounded-lg transition-all`} title="Logout">
                     <LogOut className={`w-4 h-4 ${colors.textMuted} hover:text-rose-400`} />
@@ -1761,12 +1717,12 @@ const PortfolioPath = () => {
           </div>
 
           {/* Sample Paths Chart - Full Width */}
-          <div className={`mb-4 ${colors.card} backdrop-blur-xl rounded-lg p-4 ${colors.border}`}>
+          <div className={`mb-4 ${colors.card} backdrop-blur-xl rounded-lg p-4 ${colors.border} relative z-10`}>
             <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
               <TrendingUp className="w-4 h-4 text-rose-400" />
               Sample Simulation Paths (10 Representative Outcomes)
             </h3>
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={280}>
               <LineChart data={samplePathsData}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
                 <XAxis 

@@ -5,7 +5,7 @@
  * or create an account before accessing the portfolio simulator.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, 
@@ -36,6 +36,19 @@ const AuthGate = ({ children }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  // Reset form state when user logs out (isAuthenticated becomes false)
+  useEffect(() => {
+    if (!isAuthenticated && !authLoading) {
+      setSuccess(false);
+      setError('');
+      setEmail('');
+      setPassword('');
+      setName('');
+      setMode('login');
+      setLoading(false);
+    }
+  }, [isAuthenticated, authLoading]);
 
   // Show loading while checking auth
   if (authLoading) {
