@@ -5,10 +5,9 @@
  * Uses step-by-step tooltips with highlights on relevant UI elements.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  X, 
   ChevronRight, 
   ChevronLeft, 
   Sparkles, 
@@ -202,7 +201,7 @@ const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
   }, [isFirstStep, isTransitioning]);
 
   // Remove skip handler - users must complete the tutorial
-  const handleComplete = useCallback(() => {
+  const _handleComplete = useCallback(() => {
     markTutorialComplete(userId);
     onClose();
   }, [onClose, userId]);

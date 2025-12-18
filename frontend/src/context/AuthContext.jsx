@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import { 
   registerUser as apiRegister, 
   loginUser as apiLogin, 
@@ -41,7 +41,7 @@ export const AuthProvider = ({ children }) => {
         try {
           const userData = await apiGetCurrentUser();
           setUser(userData);
-        } catch (e) {
+        } catch (_e) {
           // Token invalid or expired
           console.log('Session expired or invalid');
         }
@@ -57,7 +57,7 @@ export const AuthProvider = ({ children }) => {
   const register = async (email, password, name) => {
     try {
       // Register user with backend
-      const newUser = await apiRegister(email, password, name, name);
+      const _newUser = await apiRegister(email, password, name, name);
       
       // Auto-login after registration
       await apiLogin(email, password);
@@ -146,7 +146,7 @@ export const AuthProvider = ({ children }) => {
         const userData = await apiGetCurrentUser();
         setUser(userData);
         return userData;
-      } catch (e) {
+      } catch (_e) {
         console.log('Failed to refresh user data');
         return null;
       }

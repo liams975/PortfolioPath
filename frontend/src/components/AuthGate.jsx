@@ -5,7 +5,7 @@
  * or create an account before accessing the portfolio simulator.
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, 
@@ -27,7 +27,7 @@ import { useTheme } from '../context/ThemeContext';
 
 const AuthGate = ({ children }) => {
   const { isAuthenticated, loading: authLoading, login, register } = useAuth();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   
   const [mode, setMode] = useState('landing'); // 'login', 'register', 'landing'
   const [email, setEmail] = useState('');
@@ -109,7 +109,7 @@ const AuthGate = ({ children }) => {
       } else {
         setError(result.error || 'Authentication failed');
       }
-    } catch (err) {
+    } catch (_err) {
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);

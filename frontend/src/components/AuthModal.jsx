@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mail, Lock, User, AlertCircle, Shield, CheckCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -55,7 +55,7 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'login' }) => {
       } else {
         setError(result.error);
       }
-    } catch (err) {
+    } catch (_err) {
       setError('An unexpected error occurred');
     } finally {
       setLoading(false);

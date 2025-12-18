@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CreditCard, CheckCircle, Loader2, Shield, Star, Zap } from 'lucide-react';
 import { getPaymentConfig, createCheckoutSession } from '../services/api';

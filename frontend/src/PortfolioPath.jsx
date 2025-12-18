@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
-import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package, RefreshCw, Crown, Star, UserCircle } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package, Crown, Star } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useTheme } from './context/ThemeContext';
-import { usePremium, PRO_FEATURES, ProFeatureGate } from './context/PremiumContext';
+import { usePremium } from './context/PremiumContext';
 import AuthModal from './components/AuthModal';
 import PaymentModal from './components/PaymentModal';
 import AccountSettings from './components/AccountSettings';
@@ -21,10 +21,6 @@ import { checkApiHealth, runSimulation as runBackendSimulation } from './service
 import {
   PRESET_PORTFOLIOS,
   STRESS_SCENARIOS,
-  DEFAULT_PORTFOLIO,
-  DEFAULT_COMPARISON_PORTFOLIO,
-  DEFAULT_ADVANCED_OPTIONS,
-  assetDatabase,
   generateCorrelationMatrix
 } from './constants/portfolioConstants';
 
@@ -39,17 +35,8 @@ import {
   calculateDrawdownMetrics
 } from './utils/simulation';
 
-import {
-  useFanChartData,
-  useDynamicPercentileData,
-  useSamplePathsData,
-  useDistributionData,
-  useCorrelationData,
-  usePieChartData,
-  useComparisonPieData,
-  useEfficientFrontierData,
-  useBenchmarkSimulation
-} from './hooks/useChartData';
+// Chart data hooks available for future use
+// import { useFanChartData, useDynamicPercentileData, etc. } from './hooks/useChartData';
 
 // ============================================================================
 // REACT COMPONENT
@@ -87,7 +74,7 @@ const PortfolioPath = () => {
   const [selectedPercentile, setSelectedPercentile] = useState(50);
   
   // NEW: Benchmark
-  const [showBenchmark, setShowBenchmark] = useState(true);
+  const [_showBenchmark, _setShowBenchmark] = useState(true);
   const [benchmarkTicker, setBenchmarkTicker] = useState('SPY');
   
   // NEW: Efficient frontier
@@ -95,7 +82,7 @@ const PortfolioPath = () => {
   
   // NEW: Goal Probability
   const [goalAmount, setGoalAmount] = useState(15000);
-  const [showGoalProbability, setShowGoalProbability] = useState(true);
+  const [_showGoalProbability, _setShowGoalProbability] = useState(true);
   
   // NEW: Simulation loading state
   const [isSimulating, setIsSimulating] = useState(false);
@@ -109,8 +96,8 @@ const PortfolioPath = () => {
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
   
   // NEW: Loading states for API calls
-  const [isLoadingQuotes, setIsLoadingQuotes] = useState(false);
-  const [quoteErrors, setQuoteErrors] = useState({});
+  const [_isLoadingQuotes, _setIsLoadingQuotes] = useState(false);
+  const [_quoteErrors, _setQuoteErrors] = useState({});
   
   // NEW: Active stress scenario
   const [activeStressScenario, setActiveStressScenario] = useState('normal');
@@ -127,12 +114,12 @@ const PortfolioPath = () => {
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   
   // Onboarding tutorial - pass user.id to track per-user tutorial completion
-  const { showTutorial, startTutorial, closeTutorial } = useTutorial(user?.id);
+  const { showTutorial, startTutorial: _startTutorial, closeTutorial } = useTutorial(user?.id);
   
   // Premium/Pro tier status
   const { 
     isPremium, 
-    hasFeature, 
+    hasFeature: _hasFeature, 
     canRunSimulation, 
     trackSimulation,
     dailySimulations,
@@ -142,15 +129,15 @@ const PortfolioPath = () => {
   // Real market data hooks - fetch live parameters from Yahoo Finance
   const { 
     data: marketData, 
-    loading: marketDataLoading, 
-    error: marketDataError,
-    refresh: refreshMarketData 
+    loading: _marketDataLoading, 
+    error: _marketDataError,
+    refresh: _refreshMarketData 
   } = useMarketData(portfolio, backendConnected);
   
   // Also fetch for comparison portfolio when in comparison mode
   const { 
-    data: comparisonMarketData,
-    loading: comparisonMarketLoading 
+    data: _comparisonMarketData,
+    loading: _comparisonMarketLoading 
   } = useMarketData(comparisonPortfolio, backendConnected && comparisonMode);
   
   // Real-time quotes for display (prices, changes)
@@ -158,7 +145,7 @@ const PortfolioPath = () => {
     portfolio.map(p => p.ticker).filter(t => t && t.length > 0),
     [portfolio]
   );
-  const { quotes: liveQuotes, loading: quotesLoading } = useRealTimeQuotes(tickers, backendConnected);
+  const { quotes: _liveQuotes, loading: _quotesLoading } = useRealTimeQuotes(tickers, backendConnected);
 
   // Helper to get asset parameters (uses real data if available, falls back to static)
   const getPortfolioAssetParams = useCallback((ticker) => {
@@ -244,7 +231,7 @@ const PortfolioPath = () => {
         } else if (connected && !backendConnected) {
           toast.success('Backend connection restored.');
         }
-      } catch (error) {
+      } catch (_error) {
         setBackendConnected(false);
         if (backendConnected) {
           toast.warning('Backend connection lost. Some features may not work.');
@@ -727,13 +714,6 @@ const PortfolioPath = () => {
     };
   }, [simulationResults, benchmarkTicker, getPortfolioAssetParams, marketData]);
 
-  // Page transition variants for Framer Motion - minimal transitions to avoid flash
-  const pageVariants = {
-    initial: { opacity: 1 },
-    animate: { opacity: 1 },
-    exit: { opacity: 1 }
-  };
-
   // ============================================================================
   // INPUT VIEW
   // ============================================================================
@@ -762,7 +742,7 @@ const PortfolioPath = () => {
                   } else {
                     toast.error('Still unable to connect. Please check if the backend server is running.');
                   }
-                } catch (error) {
+                } catch (_error) {
                   toast.error('Connection check failed.');
                 } finally {
                   setIsCheckingConnection(false);
