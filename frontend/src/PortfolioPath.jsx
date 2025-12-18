@@ -761,8 +761,18 @@ const PortfolioPath = () => {
           {/* Header with Auth and Theme Toggle */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div>
-              <span className={`text-xs ${colors.textSubtle} font-mono`}>LIVE</span>
+              {/* Backend Connection Status */}
+              {backendConnected ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                  <span className={`text-xs text-emerald-400 font-mono`}>CONNECTED</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                  <span className={`text-xs text-red-400 font-mono`}>OFFLINE</span>
+                </div>
+              )}
               
               {/* Market Data Status Indicator */}
               {backendConnected && (
@@ -770,12 +780,12 @@ const PortfolioPath = () => {
                   {marketDataLoading ? (
                     <div className="flex items-center gap-1">
                       <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
-                      <span className="text-xs text-blue-400 font-mono">FETCHING DATA...</span>
+                      <span className="text-xs text-blue-400 font-mono">FETCHING...</span>
                     </div>
                   ) : Object.keys(marketData || {}).length > 0 ? (
                     <div className="flex items-center gap-1">
                       <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                      <span className="text-xs text-green-400 font-mono">REAL DATA</span>
+                      <span className="text-xs text-green-400 font-mono">MARKET DATA</span>
                       <button
                         onClick={refreshMarketData}
                         className={`p-1 ${colors.buttonSecondary} rounded transition-all hover:scale-105`}
