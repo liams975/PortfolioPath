@@ -31,9 +31,9 @@ import { usePremium } from '../context/PremiumContext';
 import { useTheme } from '../context/ThemeContext';
 
 const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
-  const { user, logout, getPortfolios } = useAuth();
+  const { user, logout, getPortfolios, updateProfile } = useAuth();
   const { isPremium, dailySimulations, FREE_SIMULATION_LIMIT } = usePremium();
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, toggleTheme } = useTheme();
   
   const [activeTab, setActiveTab] = useState('profile');
   const [loading, setLoading] = useState(false);
@@ -41,6 +41,9 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
 
   // Profile state
   const [portfolioCount, setPortfolioCount] = useState(0);
+  const [displayName, setDisplayName] = useState(user?.name || user?.username || '');
+  const [defaultTimeHorizon, setDefaultTimeHorizon] = useState(localStorage.getItem('defaultTimeHorizon') || '1');
+  const [defaultSimulations, setDefaultSimulations] = useState(localStorage.getItem('defaultSimulations') || '1000');
   
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -61,6 +64,31 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
       fetchData();
     }
   }, [isOpen, user, getPortfolios]);
+
+  const handleSavePreferences = () => {
+    localStorage.setItem('defaultTimeHorizon', defaultTimeHorizon);
+    localStorage.setItem('defaultSimulations', defaultSimulations);
+    setMessage({ type: 'success', text: 'Preferences saved successfully' });
+    setTimeout(() => setMessage({ type: '', text: '' }), 2000);
+  };
+
+  const handleUpdateProfile = async () => {
+    if (!displayName.trim()) {
+      setMessage({ type: 'error', text: 'Display name cannot be empty' });
+      return;
+    }
+    setLoading(true);
+    try {
+      if (updateProfile) {
+        await updateProfile({ name: displayName });
+      }
+      setMessage({ type: 'success', text: 'Profile updated successfully' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Failed to update profile' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handlePasswordChange = async (e) => {
     e.preventDefault();
@@ -144,6 +172,7 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
             <div className={`w-48 border-r ${colors.border} p-2`}>
               {[
                 { id: 'profile', label: 'Profile', icon: User },
+                { id: 'preferences', label: 'Preferences', icon: Settings },
                 { id: 'usage', label: 'Usage', icon: Activity },
                 { id: 'subscription', label: 'Subscription', icon: Crown },
                 { id: 'security', label: 'Security', icon: Lock },
@@ -168,17 +197,26 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
               {/* Profile Tab */}
               {activeTab === 'profile' && (
                 <div className="space-y-6">
+                  {message.text && activeTab === 'profile' && (
+                    <div className={`p-3 rounded-lg flex items-center gap-2 ${message.type === 'error' ? 'bg-red-900/30 border border-red-700/50' : 'bg-emerald-900/30 border border-emerald-700/50'}`}>
+                      {message.type === 'error' ? <AlertCircle className="w-4 h-4 text-red-400" /> : <CheckCircle className="w-4 h-4 text-emerald-400" />}
+                      <p className={`text-sm ${message.type === 'error' ? 'text-red-300' : 'text-emerald-300'}`}>{message.text}</p>
+                    </div>
+                  )}
                   <div>
                     <h3 className={`text-sm font-medium ${colors.textMuted} uppercase tracking-wider mb-3`}>
                       Account Information
                     </h3>
                     <div className="space-y-3">
-                      <div className={`flex items-center gap-3 p-3 ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'} rounded-lg`}>
-                        <User className="w-5 h-5 text-rose-400" />
-                        <div>
-                          <p className={`text-xs ${colors.textMuted}`}>Username</p>
-                          <p className={`font-medium ${colors.text}`}>{user?.username || user?.name || 'N/A'}</p>
-                        </div>
+                      <div className={`p-3 ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'} rounded-lg`}>
+                        <label className={`text-xs ${colors.textMuted} mb-1 block`}>Display Name</label>
+                        <input
+                          type="text"
+                          value={displayName}
+                          onChange={(e) => setDisplayName(e.target.value)}
+                          className={`w-full ${colors.input} ${colors.border} rounded-lg px-3 py-2 text-sm ${colors.text}`}
+                          placeholder="Your display name"
+                        />
                       </div>
                       <div className={`flex items-center gap-3 p-3 ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'} rounded-lg`}>
                         <Mail className="w-5 h-5 text-rose-400" />
@@ -194,6 +232,79 @@ const AccountSettings = ({ isOpen, onClose, onUpgrade }) => {
                           <p className={`font-medium ${colors.text}`}>{formatDate(user?.created_at)}</p>
                         </div>
                       </div>
+                      <button
+                        onClick={handleUpdateProfile}
+                        disabled={loading}
+                        className={`w-full py-2 ${colors.button} rounded-lg text-sm font-medium text-white flex items-center justify-center gap-2`}
+                      >
+                        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                        Save Profile
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Preferences Tab */}
+              {activeTab === 'preferences' && (
+                <div className="space-y-6">
+                  {message.text && activeTab === 'preferences' && (
+                    <div className={`p-3 rounded-lg flex items-center gap-2 ${message.type === 'error' ? 'bg-red-900/30 border border-red-700/50' : 'bg-emerald-900/30 border border-emerald-700/50'}`}>
+                      {message.type === 'error' ? <AlertCircle className="w-4 h-4 text-red-400" /> : <CheckCircle className="w-4 h-4 text-emerald-400" />}
+                      <p className={`text-sm ${message.type === 'error' ? 'text-red-300' : 'text-emerald-300'}`}>{message.text}</p>
+                    </div>
+                  )}
+                  <div>
+                    <h3 className={`text-sm font-medium ${colors.textMuted} uppercase tracking-wider mb-3`}>
+                      Display Settings
+                    </h3>
+                    <div className={`p-3 ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'} rounded-lg flex items-center justify-between`}>
+                      <span className={colors.text}>Dark Mode</span>
+                      <button
+                        onClick={toggleTheme}
+                        className={`relative w-12 h-6 rounded-full transition-colors ${isDark ? 'bg-rose-600' : 'bg-zinc-400'}`}
+                      >
+                        <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${isDark ? 'translate-x-6' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-medium ${colors.textMuted} uppercase tracking-wider mb-3`}>
+                      Default Simulation Settings
+                    </h3>
+                    <div className="space-y-3">
+                      <div className={`p-3 ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'} rounded-lg`}>
+                        <label className={`text-xs ${colors.textMuted} mb-1 block`}>Default Time Horizon</label>
+                        <select
+                          value={defaultTimeHorizon}
+                          onChange={(e) => setDefaultTimeHorizon(e.target.value)}
+                          className={`w-full ${colors.input} ${colors.border} rounded-lg px-3 py-2 text-sm ${colors.text}`}
+                        >
+                          <option value="1">1 Year</option>
+                          <option value="3">3 Years</option>
+                          <option value="5">5 Years</option>
+                          <option value="10">10 Years</option>
+                        </select>
+                      </div>
+                      <div className={`p-3 ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'} rounded-lg`}>
+                        <label className={`text-xs ${colors.textMuted} mb-1 block`}>Default Simulations</label>
+                        <select
+                          value={defaultSimulations}
+                          onChange={(e) => setDefaultSimulations(e.target.value)}
+                          className={`w-full ${colors.input} ${colors.border} rounded-lg px-3 py-2 text-sm ${colors.text}`}
+                        >
+                          <option value="500">500</option>
+                          <option value="1000">1,000</option>
+                          <option value="5000">5,000</option>
+                          <option value="10000">10,000</option>
+                        </select>
+                      </div>
+                      <button
+                        onClick={handleSavePreferences}
+                        className={`w-full py-2 ${colors.button} rounded-lg text-sm font-medium text-white`}
+                      >
+                        Save Preferences
+                      </button>
                     </div>
                   </div>
                 </div>

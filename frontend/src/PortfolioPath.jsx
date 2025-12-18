@@ -264,6 +264,20 @@ const PortfolioPath = () => {
   }, [backendConnected]);
 
   const runSimulation = async () => {
+    // Validate portfolio has at least one valid ticker
+    const validPositions = portfolio.filter(p => p.ticker && p.ticker.trim().length > 0 && p.weight > 0);
+    if (validPositions.length === 0) {
+      toast.error('Please add at least one valid asset with a weight greater than 0%');
+      return;
+    }
+    
+    // Check for invalid ticker formats
+    const invalidTickers = portfolio.filter(p => p.ticker && !/^[A-Za-z0-9.-]+$/.test(p.ticker.trim()));
+    if (invalidTickers.length > 0) {
+      toast.error(`Invalid ticker format: ${invalidTickers.map(p => p.ticker).join(', ')}. Tickers can only contain letters, numbers, dots, and hyphens.`);
+      return;
+    }
+    
     if (Math.abs(totalWeight - 1) > 0.01) {
       toast.error(`Portfolio weights must sum to 100% (currently ${(totalWeight * 100).toFixed(1)}%)`);
       return;
@@ -375,6 +389,8 @@ const PortfolioPath = () => {
             
             setIsSimulating(false);
             setView('results');
+            // Scroll to top when results load
+            window.scrollTo({ top: 0, behavior: 'smooth' });
             toast.success('Simulation completed using real market data');
             return;
           }
@@ -432,6 +448,8 @@ const PortfolioPath = () => {
         
         setIsSimulating(false);
         setView('results');
+        // Scroll to top when results load
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }, 50);
       
     } catch (error) {
@@ -761,6 +779,14 @@ const PortfolioPath = () => {
           {/* Header with Auth and Theme Toggle */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">
+              {/* API Connection Indicator */}
+              <div 
+                className={`flex items-center gap-2 px-3 py-2 ${colors.card} ${colors.border} rounded-lg`}
+                title={backendConnected ? 'API Connected' : 'API Disconnected'}
+              >
+                <div className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+                <span className={`text-xs ${colors.textMuted}`}>{backendConnected ? 'API Online' : 'API Offline'}</span>
+              </div>
               {/* Theme Toggle */}
               <button
                 onClick={toggleTheme}
@@ -1714,6 +1740,51 @@ const PortfolioPath = () => {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Interactive Percentile Path Chart */}
+          <div className={`mb-4 ${colors.card} backdrop-blur-xl rounded-lg p-4 ${colors.border}`}>
+            <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${colors.text}`}>
+              <Sliders className="w-4 h-4 text-rose-400" />
+              Interactive Percentile Path ({selectedPercentile}th Percentile)
+              {comparisonMode && comparisonResults && <span className="text-blue-400 ml-2">vs Comparison</span>}
+            </h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <AreaChart data={dynamicPercentileData}>
+                <defs>
+                  <linearGradient id="percentileGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#e11d48" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#e11d48" stopOpacity={0.05}/>
+                  </linearGradient>
+                  <linearGradient id="comparisonGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#27272a' : '#e7e5e4'} />
+                <XAxis 
+                  dataKey="day" 
+                  stroke={isDark ? '#71717a' : '#78716c'} 
+                  tick={{ fontSize: 10 }} 
+                  tickFormatter={(day) => day === 0 ? 'Now' : day >= 252 ? `${(day/252).toFixed(1)}y` : `${day}d`}
+                />
+                <YAxis stroke={isDark ? '#71717a' : '#78716c'} tick={{ fontSize: 10 }} tickFormatter={(v) => v >= 1000000 ? `$${(v/1000000).toFixed(1)}M` : `$${(v/1000).toFixed(0)}k`} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: isDark ? '#18181b' : '#fafaf9', border: '1px solid #3f3f46', borderRadius: '8px', fontSize: '12px' }} 
+                  formatter={(value, name) => [`$${value?.toLocaleString(undefined, {maximumFractionDigits: 0}) || 'N/A'}`, name === 'selected' ? `${selectedPercentile}th %ile (Main)` : `${selectedPercentile}th %ile (Comparison)`]}
+                  labelFormatter={(day) => `Day ${day} (${(day/252).toFixed(2)} years)`}
+                />
+                <ReferenceLine y={initialValue} stroke="#71717a" strokeDasharray="3 3" />
+                {goalAmount > 0 && <ReferenceLine y={goalAmount} stroke="#10b981" strokeDasharray="5 5" label={{ value: 'Goal', fill: '#10b981', fontSize: 10 }} />}
+                <Area type="monotone" dataKey="selected" stroke="#e11d48" strokeWidth={2.5} fill="url(#percentileGradient)" name="selected" />
+                {comparisonMode && comparisonResults && (
+                  <Area type="monotone" dataKey="comparison" stroke="#3b82f6" strokeWidth={2.5} fill="url(#comparisonGradient)" name="comparison" />
+                )}
+              </AreaChart>
+            </ResponsiveContainer>
+            <p className={`text-xs ${colors.textMuted} mt-2 text-center`}>
+              Use the percentile slider in the header to adjust. This shows where {selectedPercentile}% of simulations fell at or below.
+            </p>
           </div>
 
           {/* Sample Paths Chart - Full Width */}
