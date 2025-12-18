@@ -2,11 +2,10 @@
  * Onboarding Tutorial Component
  * 
  * First-time user walkthrough that guides users through the app's features.
- * Uses step-by-step tooltips with highlights on relevant UI elements.
+ * Simple modal-based tutorial without complex animations.
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChevronRight, 
   ChevronLeft, 
@@ -21,79 +20,61 @@ import {
   CheckCircle
 } from 'lucide-react';
 
-// Tutorial steps configuration
+// Tutorial steps configuration - simplified without highlights
 const TUTORIAL_STEPS = [
   {
     id: 'welcome',
     title: 'Welcome to PortfolioPath Pro! 🎉',
     description: 'Let\'s take a quick tour of the app to help you get started with Monte Carlo portfolio simulations.',
     icon: Sparkles,
-    position: 'center',
-    highlight: null,
   },
   {
     id: 'portfolio',
     title: 'Build Your Portfolio',
-    description: 'Start by adding ticker symbols and their weights. We fetch real market data from Yahoo Finance to power your simulations.',
+    description: 'Start by adding ticker symbols (like AAPL, GOOGL, SPY) and their weights. We fetch real market data from Yahoo Finance to power your simulations.',
     icon: PieChart,
-    position: 'right',
-    highlight: '[data-tour="portfolio"]',
   },
   {
     id: 'presets',
     title: 'Quick Start Templates',
-    description: 'Not sure where to start? Choose from pre-built portfolios like "Classic 60/40" or "Aggressive Growth".',
+    description: 'Not sure where to start? Use the preset portfolios like "Classic 60/40" or "Aggressive Growth" to get started quickly.',
     icon: Target,
-    position: 'bottom',
-    highlight: '[data-tour="presets"]',
   },
   {
     id: 'parameters',
     title: 'Configure Simulation',
-    description: 'Set your initial investment, time horizon, and number of simulations. More simulations = more accurate results.',
+    description: 'Set your initial investment amount, time horizon (in years), and number of simulations. More simulations = more accurate results.',
     icon: Settings,
-    position: 'left',
-    highlight: '[data-tour="parameters"]',
   },
   {
     id: 'advanced',
     title: 'Advanced Models',
-    description: 'Enable sophisticated features like GARCH volatility, regime switching, and jump diffusion for more realistic scenarios.',
+    description: 'Enable sophisticated features like GARCH volatility, regime switching, and jump diffusion for more realistic market scenarios.',
     icon: BarChart3,
-    position: 'left',
-    highlight: '[data-tour="advanced"]',
   },
   {
     id: 'compare',
     title: 'Compare Portfolios',
-    description: 'Toggle comparison mode to analyze two portfolios side-by-side. Great for testing different strategies!',
+    description: 'Use the Compare button to analyze two portfolios side-by-side. Great for testing different investment strategies!',
     icon: GitCompare,
-    position: 'bottom',
-    highlight: '[data-tour="compare"]',
   },
   {
     id: 'results',
     title: 'Analyze Results',
-    description: 'After running a simulation, explore fan charts, risk metrics, goal probabilities, and more in the results view.',
+    description: 'After running a simulation, explore fan charts showing potential outcomes, risk metrics, and probability of reaching your goals.',
     icon: TrendingUp,
-    position: 'center',
-    highlight: null,
   },
   {
     id: 'export',
     title: 'Export & Save',
-    description: 'Save your portfolios to your account and export results to PDF or CSV for sharing.',
+    description: 'Save your portfolios to your account for later. You can also export results to PDF or CSV for sharing.',
     icon: Download,
-    position: 'center',
-    highlight: null,
   },
   {
     id: 'complete',
     title: 'You\'re All Set! 🚀',
-    description: 'Start building your first portfolio and run a simulation. You can always restart this tour from settings.',
+    description: 'Start building your first portfolio and click "Run Simulation" to see the magic happen!',
     icon: CheckCircle,
-    position: 'center',
-    highlight: null,
   },
 ];
 
@@ -106,7 +87,7 @@ const TUTORIAL_COMPLETED_KEY = 'portfoliopath_tutorial_completed';
 export const shouldShowTutorial = (userId) => {
   if (!userId) return false;
   const completedUsers = JSON.parse(localStorage.getItem(TUTORIAL_COMPLETED_KEY) || '[]');
-  return !completedUsers.includes(userId);
+  return !completedUsers.includes(String(userId));
 };
 
 /**
@@ -115,8 +96,9 @@ export const shouldShowTutorial = (userId) => {
 export const markTutorialComplete = (userId) => {
   if (!userId) return;
   const completedUsers = JSON.parse(localStorage.getItem(TUTORIAL_COMPLETED_KEY) || '[]');
-  if (!completedUsers.includes(userId)) {
-    completedUsers.push(userId);
+  const userIdStr = String(userId);
+  if (!completedUsers.includes(userIdStr)) {
+    completedUsers.push(userIdStr);
     localStorage.setItem(TUTORIAL_COMPLETED_KEY, JSON.stringify(completedUsers));
   }
 };
@@ -127,265 +109,172 @@ export const markTutorialComplete = (userId) => {
 export const resetTutorial = (userId) => {
   if (!userId) return;
   const completedUsers = JSON.parse(localStorage.getItem(TUTORIAL_COMPLETED_KEY) || '[]');
-  const filtered = completedUsers.filter(id => id !== userId);
+  const filtered = completedUsers.filter(id => id !== String(userId));
   localStorage.setItem(TUTORIAL_COMPLETED_KEY, JSON.stringify(filtered));
 };
 
 /**
- * Main Onboarding Tutorial Component
+ * Main Onboarding Tutorial Component - Simple Modal Version
  */
 const OnboardingTutorial = ({ isOpen, onClose, isDark = true, userId }) => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [highlightRect, setHighlightRect] = useState(null);
-  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Reset step when tutorial opens
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentStep(0);
+    }
+  }, [isOpen]);
 
   const colors = isDark ? {
-    bg: 'bg-zinc-900',
     card: 'bg-zinc-800',
     border: 'border-zinc-700',
     text: 'text-zinc-100',
     textMuted: 'text-zinc-400',
-    accent: 'from-rose-500 to-red-500',
   } : {
-    bg: 'bg-white',
-    card: 'bg-gray-50',
+    card: 'bg-white',
     border: 'border-gray-200',
     text: 'text-gray-900',
     textMuted: 'text-gray-500',
-    accent: 'from-rose-500 to-red-500',
   };
 
   const step = TUTORIAL_STEPS[currentStep];
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === TUTORIAL_STEPS.length - 1;
-
-  // Update highlighted element rect when step changes
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    const updateHighlight = () => {
-      if (step.highlight) {
-        const element = document.querySelector(step.highlight);
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          setHighlightRect({
-            top: rect.top,
-            left: rect.left,
-            width: rect.width,
-            height: rect.height,
-          });
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-          setHighlightRect(null);
-        }
-      } else {
-        setHighlightRect(null);
-      }
-    };
-
-    // Small delay to let DOM settle after step change
-    const timer = setTimeout(updateHighlight, 150);
-    return () => clearTimeout(timer);
-  }, [currentStep, step.highlight, isOpen]);
+  const Icon = step.icon;
 
   const handleNext = useCallback(() => {
-    if (isTransitioning) return;
     if (isLastStep) {
       markTutorialComplete(userId);
       onClose();
     } else {
-      setIsTransitioning(true);
-      setTimeout(() => {
-        setCurrentStep(prev => prev + 1);
-        setIsTransitioning(false);
-      }, 100);
+      setCurrentStep(prev => prev + 1);
     }
-  }, [isLastStep, onClose, userId, isTransitioning]);
+  }, [isLastStep, userId, onClose]);
 
   const handlePrev = useCallback(() => {
-    if (isTransitioning) return;
     if (!isFirstStep) {
-      setIsTransitioning(true);
-      setTimeout(() => {
-        setCurrentStep(prev => prev - 1);
-        setIsTransitioning(false);
-      }, 100);
+      setCurrentStep(prev => prev - 1);
     }
-  }, [isFirstStep, isTransitioning]);
+  }, [isFirstStep]);
 
-  // Remove skip handler - users must complete the tutorial
-  const _handleComplete = useCallback(() => {
+  const handleSkip = useCallback(() => {
     markTutorialComplete(userId);
     onClose();
-  }, [onClose, userId]);
+  }, [userId, onClose]);
 
-  const handleKeyDown = useCallback((e) => {
-    if (e.key === 'ArrowRight' || e.key === 'Enter') {
-      handleNext();
-    } else if (e.key === 'ArrowLeft') {
-      handlePrev();
-    }
-    // Remove Escape key handling - can't skip tutorial
-  }, [handleNext, handlePrev]);
-
+  // Keyboard navigation
   useEffect(() => {
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [isOpen, handleKeyDown]);
+    if (!isOpen) return;
+    
+    const handleKeyDown = (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'Enter') {
+        handleNext();
+      } else if (e.key === 'ArrowLeft') {
+        handlePrev();
+      } else if (e.key === 'Escape') {
+        handleSkip();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, handleNext, handlePrev, handleSkip]);
 
   if (!isOpen) return null;
 
-  const Icon = step.icon;
-
-  // Calculate tooltip position based on highlighted element
-  const getTooltipPosition = () => {
-    if (!highlightRect || step.position === 'center') {
-      return {
-        position: 'fixed',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-      };
-    }
-
-    const positions = {
-      top: {
-        position: 'fixed',
-        top: `${highlightRect.top - 16}px`,
-        left: `${highlightRect.left + highlightRect.width / 2}px`,
-        transform: 'translate(-50%, -100%)',
-      },
-      bottom: {
-        position: 'fixed',
-        top: `${highlightRect.top + highlightRect.height + 16}px`,
-        left: `${highlightRect.left + highlightRect.width / 2}px`,
-        transform: 'translateX(-50%)',
-      },
-      left: {
-        position: 'fixed',
-        top: `${highlightRect.top + highlightRect.height / 2}px`,
-        left: `${highlightRect.left - 16}px`,
-        transform: 'translate(-100%, -50%)',
-      },
-      right: {
-        position: 'fixed',
-        top: `${highlightRect.top + highlightRect.height / 2}px`,
-        left: `${highlightRect.left + highlightRect.width + 16}px`,
-        transform: 'translateY(-50%)',
-      },
-    };
-
-    return positions[step.position] || positions.bottom;
-  };
-
   return (
-    <AnimatePresence>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
       {/* Backdrop */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100]"
+      <div 
+        className="absolute inset-0 bg-black/85"
+        onClick={handleSkip}
+      />
+      
+      {/* Modal Card */}
+      <div 
+        className={`relative ${colors.card} ${colors.border} border rounded-2xl p-8 shadow-2xl max-w-lg mx-4 w-full`}
+        style={{ maxHeight: '90vh', overflow: 'auto' }}
       >
-        {/* Dark overlay - not clickable */}
-        <div className="absolute inset-0 bg-black/80" />
-
-        {/* Highlight ring around target element */}
-        {highlightRect && (
-          <motion.div
-            key={currentStep}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="absolute pointer-events-none"
-            style={{
-              top: highlightRect.top - 8,
-              left: highlightRect.left - 8,
-              width: highlightRect.width + 16,
-              height: highlightRect.height + 16,
-              borderRadius: '12px',
-              boxShadow: '0 0 0 4px rgba(244, 63, 94, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.8)',
-            }}
-          />
-        )}
-
-        {/* Tooltip Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 20 }}
-          style={getTooltipPosition()}
-          className={`${colors.card} ${colors.border} border rounded-2xl p-6 shadow-2xl max-w-md z-[101]`}
+        {/* Skip button */}
+        <button
+          onClick={handleSkip}
+          className={`absolute top-4 right-4 text-xs ${colors.textMuted} hover:text-rose-400 transition-colors`}
         >
-          {/* Icon */}
-          <div className="flex items-center justify-center mb-4">
-            <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${colors.accent} flex items-center justify-center`}>
-              <Icon className="w-7 h-7 text-white" />
-            </div>
-          </div>
+          Skip tour
+        </button>
 
-          {/* Content */}
-          <div className="text-center mb-6">
-            <h3 className={`text-xl font-bold ${colors.text} mb-2`}>
-              {step.title}
-            </h3>
-            <p className={`${colors.textMuted} text-sm leading-relaxed`}>
-              {step.description}
-            </p>
-          </div>
+        {/* Step Counter */}
+        <div className={`text-xs ${colors.textMuted} text-center mb-4`}>
+          Step {currentStep + 1} of {TUTORIAL_STEPS.length}
+        </div>
 
-          {/* Progress Dots - not clickable */}
-          <div className="flex items-center justify-center gap-1.5 mb-6">
-            {TUTORIAL_STEPS.map((_, idx) => (
-              <div
-                key={idx}
-                className={`w-2 h-2 rounded-full transition-all ${
-                  idx === currentStep 
-                    ? 'bg-rose-500 w-6' 
-                    : idx < currentStep 
-                      ? 'bg-rose-500/50' 
-                      : isDark ? 'bg-zinc-600' : 'bg-gray-300'
-                }`}
-              />
-            ))}
+        {/* Icon */}
+        <div className="flex items-center justify-center mb-6">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center shadow-lg shadow-rose-500/30">
+            <Icon className="w-8 h-8 text-white" />
           </div>
+        </div>
 
-          {/* Navigation Buttons - no skip option */}
-          <div className="flex items-center justify-center gap-3">
-              {!isFirstStep && (
-                <button
-                  onClick={handlePrev}
-                  className={`px-4 py-2 ${colors.card} ${colors.border} border rounded-lg flex items-center gap-1 text-sm ${colors.text} hover:bg-zinc-700 transition-colors`}
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  Back
-                </button>
-              )}
-              
-              <button
-                onClick={handleNext}
-                disabled={isTransitioning}
-                className={`px-6 py-2 bg-gradient-to-r ${colors.accent} rounded-lg flex items-center gap-1 text-sm text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50`}
-              >
-                {isLastStep ? 'Get Started' : 'Next'}
-                {!isLastStep && <ChevronRight className="w-4 h-4" />}
-              </button>
-          </div>
-
-          {/* Keyboard hints */}
-          <p className={`text-xs ${colors.textMuted} text-center mt-4`}>
-            Use ← → arrows to navigate
+        {/* Content */}
+        <div className="text-center mb-8">
+          <h3 className={`text-2xl font-bold ${colors.text} mb-3`}>
+            {step.title}
+          </h3>
+          <p className={`${colors.textMuted} leading-relaxed`}>
+            {step.description}
           </p>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+
+        {/* Progress Dots */}
+        <div className="flex items-center justify-center gap-2 mb-8">
+          {TUTORIAL_STEPS.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentStep(idx)}
+              className={`h-2 rounded-full transition-all duration-300 cursor-pointer hover:opacity-80 ${
+                idx === currentStep 
+                  ? 'bg-rose-500 w-8' 
+                  : idx < currentStep 
+                    ? 'bg-rose-500/50 w-2' 
+                    : isDark ? 'bg-zinc-600 w-2' : 'bg-gray-300 w-2'
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* Navigation Buttons */}
+        <div className="flex items-center justify-center gap-4">
+          {!isFirstStep && (
+            <button
+              onClick={handlePrev}
+              className={`px-5 py-2.5 ${colors.card} ${colors.border} border rounded-xl flex items-center gap-2 ${colors.text} hover:bg-zinc-700/50 transition-colors`}
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Back
+            </button>
+          )}
+          
+          <button
+            onClick={handleNext}
+            className="px-8 py-2.5 bg-gradient-to-r from-rose-500 to-red-600 rounded-xl flex items-center gap-2 text-white font-semibold hover:from-rose-600 hover:to-red-700 transition-all shadow-lg shadow-rose-500/30"
+          >
+            {isLastStep ? 'Get Started!' : 'Next'}
+            {!isLastStep && <ChevronRight className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {/* Keyboard hint */}
+        <p className={`text-xs ${colors.textMuted} text-center mt-6`}>
+          Use ← → arrow keys to navigate • Esc to skip
+        </p>
+      </div>
+    </div>
   );
 };
 
 /**
  * Hook to manage tutorial state
- * Shows tutorial for any user who hasn't completed it yet
  */
 export const useTutorial = (userId) => {
   const [showTutorial, setShowTutorial] = useState(false);
@@ -393,12 +282,12 @@ export const useTutorial = (userId) => {
   useEffect(() => {
     if (!userId) return;
     
-    // Check if this user has completed the tutorial
-    // Show tutorial for ANY user who hasn't completed it
+    // Show tutorial for any user who hasn't completed it
     if (shouldShowTutorial(userId)) {
+      // Delay to let the main UI render first
       const timer = setTimeout(() => {
         setShowTutorial(true);
-      }, 800); // Small delay to let the UI settle
+      }, 1000);
       return () => clearTimeout(timer);
     }
   }, [userId]);

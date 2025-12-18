@@ -405,12 +405,32 @@ export const calculateGoalProbability = async (simulationParams, targetAmount) =
 // ============================================================================
 
 export const savePortfolio = async (portfolioData) => {
+  // Transform holdings from frontend format (weight 0-1) to API format (allocation 0-100)
+  const holdings = (portfolioData.holdings || portfolioData.portfolio || []).map(h => ({
+    ticker: h.ticker,
+    name: h.name || h.ticker,
+    allocation: (h.allocation !== undefined) ? h.allocation : (h.weight * 100)
+  }));
+  
+  // Convert time horizon from days to years if needed
+  const timeHorizon = portfolioData.timeHorizon > 50 
+    ? Math.round(portfolioData.timeHorizon / 252) 
+    : portfolioData.timeHorizon;
+  
   if (!authToken) {
     const saved = localStorage.getItem('portfoliopath_portfolios');
     const portfolios = saved ? JSON.parse(saved) : [];
     const newPortfolio = { 
-      id: `local_${Date.now()}`, 
-      ...portfolioData, 
+      id: `local_${Date.now()}`,
+      name: portfolioData.name,
+      data: {
+        portfolio: portfolioData.portfolio || portfolioData.holdings,
+        initialValue: portfolioData.initialValue || portfolioData.initialInvestment || 10000,
+        timeHorizon: portfolioData.timeHorizon || 252,
+        numSimulations: portfolioData.numSimulations || 1000,
+        advancedOptions: portfolioData.advancedOptions || {},
+        scenarios: portfolioData.scenarios || {}
+      },
       savedAt: new Date().toISOString() 
     };
     portfolios.push(newPortfolio);
@@ -424,11 +444,16 @@ export const savePortfolio = async (portfolioData) => {
     body: JSON.stringify({
       name: portfolioData.name,
       description: portfolioData.description || '',
-      initial_investment: portfolioData.initialInvestment || 10000,
+      initial_investment: portfolioData.initialValue || portfolioData.initialInvestment || 10000,
       monthly_contribution: portfolioData.monthlyContribution || 0,
-      time_horizon: portfolioData.timeHorizon || 10,
-      holdings: portfolioData.holdings || [],
-      simulation_config: portfolioData.simulationConfig || {}
+      time_horizon: timeHorizon || 10,
+      holdings: holdings,
+      simulation_config: {
+        numSimulations: portfolioData.numSimulations,
+        advancedOptions: portfolioData.advancedOptions,
+        scenarios: portfolioData.scenarios,
+        ...portfolioData.simulationConfig
+      }
     }),
     signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
   });
@@ -461,7 +486,25 @@ export const loadPortfolios = async () => {
     throw new Error('Failed to load portfolios');
   }
   
-  return response.json();
+  const apiPortfolios = await response.json();
+  
+  // Transform API response to match frontend expected format
+  return apiPortfolios.map(p => ({
+    id: p.id,
+    name: p.name,
+    data: {
+      portfolio: (p.holdings || []).map(h => ({
+        ticker: h.ticker,
+        weight: h.allocation / 100 // Convert from 0-100 to 0-1
+      })),
+      initialValue: p.initial_investment || 10000,
+      timeHorizon: (p.time_horizon || 10) * 252, // Convert years to days
+      numSimulations: p.simulation_config?.numSimulations || 1000,
+      advancedOptions: p.simulation_config?.advancedOptions || {},
+      scenarios: p.simulation_config?.scenarios || {}
+    },
+    createdAt: p.created_at
+  }));
 };
 
 export const getPortfolio = async (portfolioId) => {
