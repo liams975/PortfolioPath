@@ -1,681 +1,20 @@
 /**
- * ============================================================================
- * API SERVICE LAYER - FULL BACKEND INTEGRATION
- * ============================================================================
+ * API Service - PortfolioPath Demo
  * 
- * This service connects to the FastAPI backend for:
+ * Connects to the Vercel-hosted FastAPI backend for:
  * - Real-time stock data (via yfinance)
- * - Monte Carlo simulations (NumPy-powered backend)
- * - User authentication (JWT)
- * - Portfolio persistence (SQLite)
- * 
- * Backend: http://localhost:8000
- * 
- * ============================================================================
+ * - Monte Carlo simulations
  */
 
-// Configuration
 const API_CONFIG = {
   BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
   TIMEOUT: 30000,
 };
 
-// ============================================================================
-// AUTH TOKEN MANAGEMENT
-// ============================================================================
-
-let authToken = localStorage.getItem('portfoliopath_token') || null;
-
-export const setAuthToken = (token) => {
-  authToken = token;
-  if (token) {
-    localStorage.setItem('portfoliopath_token', token);
-  } else {
-    localStorage.removeItem('portfoliopath_token');
-  }
-};
-
-export const getAuthToken = () => authToken;
-
-export const clearAuthToken = () => {
-  authToken = null;
-  localStorage.removeItem('portfoliopath_token');
-};
-
-// Helper for authenticated requests
-const authHeaders = () => ({
-  'Content-Type': 'application/json',
-  ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
-});
+const headers = () => ({ 'Content-Type': 'application/json' });
 
 // ============================================================================
-// AUTHENTICATION API
-// ============================================================================
-
-export const registerUser = async (email, password, username, fullName = '') => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      email, 
-      password, 
-      username: username || email.split('@')[0], // Use email prefix if no username
-      full_name: fullName 
-    }),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    // Handle validation errors
-    if (error.detail && Array.isArray(error.detail)) {
-      const messages = error.detail.map(d => d.msg).join(', ');
-      throw new Error(messages);
-    }
-    throw new Error(error.detail || 'Registration failed');
-  }
-  
-  return response.json();
-};
-
-export const loginUser = async (email, password) => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Login failed');
-  }
-  
-  const data = await response.json();
-  setAuthToken(data.access_token);
-  return data;
-};
-
-export const logoutUser = () => {
-  clearAuthToken();
-};
-
-export const getCurrentUser = async () => {
-  if (!authToken) throw new Error('Not authenticated');
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/auth/me`, {
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    if (response.status === 401) {
-      clearAuthToken();
-      throw new Error('Session expired');
-    }
-    throw new Error('Failed to get user profile');
-  }
-  
-  return response.json();
-};
-
-export const isAuthenticated = () => !!authToken;
-
-// ============================================================================
-// STOCK DATA API
-// ============================================================================
-
-export const fetchStockQuote = async (ticker) => {
-  try {
-    const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/quote/${ticker}`, {
-      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-    });
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new Error(`Ticker "${ticker}" not found. Please check the symbol.`);
-      }
-      throw new Error(`Failed to fetch ${ticker}: ${response.statusText}`);
-    }
-    const data = await response.json();
-    return { ...data, timestamp: Date.now() };
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error(`Request timed out while fetching ${ticker}. Please try again.`);
-    }
-    throw error;
-  }
-};
-
-export const fetchBatchQuotes = async (tickers) => {
-  try {
-    const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/batch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tickers: tickers }),
-      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-    });
-    if (!response.ok) {
-      if (response.status === 400) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(error.detail || 'Invalid request. Please check your ticker symbols.');
-      }
-      throw new Error(`Failed to fetch quotes: ${response.statusText}`);
-    }
-    const data = await response.json();
-    return data.quotes || {};
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error('Request timed out while fetching quotes. Please try again.');
-    }
-    throw error;
-  }
-};
-
-export const fetchHistoricalData = async (ticker, period = '5y') => {
-  try {
-    const response = await fetch(
-      `${API_CONFIG.BASE_URL}/api/stocks/historical/${ticker}?period=${period}`,
-      { signal: AbortSignal.timeout(API_CONFIG.TIMEOUT) }
-    );
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new Error(`Historical data not available for "${ticker}".`);
-      }
-      throw new Error(`Failed to fetch historical data for ${ticker}: ${response.statusText}`);
-    }
-    return response.json();
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error(`Request timed out while fetching historical data for ${ticker}. Please try again.`);
-    }
-    throw error;
-  }
-};
-
-export const fetchAssetParameters = async (ticker) => {
-  try {
-    const data = await fetchHistoricalData(ticker, '5y');
-    // Backend returns ANNUALIZED returns/vol, but we store DAILY values
-    // to match the static assetDatabase format (which uses daily returns)
-    // Convert: annualized_return / 252 = daily_return
-    // Convert: annualized_vol / sqrt(252) = daily_vol
-    const annualizedMean = data.statistics?.mean_return || 0.0756; // ~7.56% annual default
-    const annualizedVol = data.statistics?.volatility || 0.15; // ~15% annual vol default
-    
-    return { 
-      mean: annualizedMean / 252, // Convert to daily return
-      vol: annualizedVol / Math.sqrt(252), // Convert to daily volatility
-      name: data.ticker,
-      sharpeRatio: data.statistics?.sharpe_ratio || 0,
-      maxDrawdown: data.statistics?.max_drawdown || 0,
-      totalReturn: data.statistics?.total_return || 0
-    };
-  } catch {
-    return { mean: 0.0003, vol: 0.015, name: ticker.toUpperCase() };
-  }
-};
-
-export const validateTicker = async (ticker) => {
-  try {
-    const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/validate/${ticker}`);
-    if (!response.ok) return false;
-    const data = await response.json();
-    return data.valid === true;
-  } catch {
-    return false;
-  }
-};
-
-export const searchTickers = async (query) => {
-  try {
-    const response = await fetch(
-      `${API_CONFIG.BASE_URL}/api/stocks/search?q=${encodeURIComponent(query)}`,
-      { signal: AbortSignal.timeout(API_CONFIG.TIMEOUT) }
-    );
-    if (!response.ok) return [];
-    return response.json();
-  } catch {
-    return [];
-  }
-};
-
-export const fetchCorrelationMatrix = async (tickers) => {
-  try {
-    const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/correlation`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tickers: tickers, period: '5y' }),
-      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-    });
-    if (!response.ok) throw new Error('Failed to fetch correlation matrix');
-    const data = await response.json();
-    return data.matrix || data;
-  } catch {
-    const n = tickers.length;
-    const matrix = Array(n).fill(0).map(() => Array(n).fill(0));
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
-        matrix[i][j] = i === j ? 1 : 0.5;
-      }
-    }
-    return matrix;
-  }
-};
-
-// ============================================================================
-// MONTE CARLO SIMULATION API
-// ============================================================================
-
-/**
- * Get current simulation usage status for authenticated user
- */
-export const getSimulationUsage = async () => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/simulation/usage`, {
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get usage' }));
-    throw new Error(error.detail || 'Failed to get usage status');
-  }
-  
-  return response.json();
-};
-
-export const runSimulation = async ({
-  holdings,
-  initialInvestment = 10000,
-  monthlyContribution = 0,
-  timeHorizon = 10,
-  numSimulations = 1000,
-  includeDividends = true,
-  dividendYield = null,
-  includeJumpDiffusion = false,
-  jumpProbability = 0.05,
-  jumpMean = -0.1,
-  jumpStd = 0.15
-}) => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/simulation/run`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      holdings: holdings.map(h => ({
-        ticker: h.ticker,
-        allocation: h.allocation
-      })),
-      initial_investment: initialInvestment,
-      monthly_contribution: monthlyContribution,
-      time_horizon: timeHorizon,
-      num_simulations: numSimulations,
-      include_dividends: includeDividends,
-      dividend_yield: dividendYield,
-      include_jump_diffusion: includeJumpDiffusion,
-      jump_probability: jumpProbability,
-      jump_mean: jumpMean,
-      jump_std: jumpStd
-    }),
-    signal: AbortSignal.timeout(60000)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Simulation failed' }));
-    
-    // Handle specific errors
-    if (response.status === 401) {
-      throw new Error('Please sign in to run simulations');
-    }
-    if (response.status === 429) {
-      throw new Error(error.detail || 'Daily simulation limit reached. Upgrade to Pro for unlimited.');
-    }
-    
-    throw new Error(error.detail || 'Simulation failed');
-  }
-  
-  return response.json();
-};
-
-export const comparePortfolios = async (portfolioA, portfolioB) => {
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/simulation/compare`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      portfolio_a: portfolioA,
-      portfolio_b: portfolioB
-    }),
-    signal: AbortSignal.timeout(120000)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    
-    if (response.status === 401) {
-      throw new Error('Please sign in to compare portfolios');
-    }
-    if (response.status === 429) {
-      throw new Error(error.detail || 'Daily simulation limit reached');
-    }
-    
-    throw new Error(error.detail || 'Comparison failed');
-  }
-  
-  return response.json();
-};
-
-export const generateEfficientFrontier = async (tickers, numPortfolios = 100) => {
-  const response = await fetch(
-    `${API_CONFIG.BASE_URL}/api/simulation/efficient-frontier?num_portfolios=${numPortfolios}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(tickers),
-      signal: AbortSignal.timeout(60000)
-    }
-  );
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to generate efficient frontier');
-  }
-  
-  return response.json();
-};
-
-export const calculateGoalProbability = async (simulationParams, targetAmount) => {
-  const response = await fetch(
-    `${API_CONFIG.BASE_URL}/api/simulation/goal-probability?target_amount=${targetAmount}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(simulationParams),
-      signal: AbortSignal.timeout(60000)
-    }
-  );
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to calculate goal probability');
-  }
-  
-  return response.json();
-};
-
-// ============================================================================
-// PORTFOLIO PERSISTENCE API
-// ============================================================================
-
-export const savePortfolio = async (portfolioData) => {
-  // Transform holdings from frontend format (weight 0-1) to API format (allocation 0-100)
-  const holdings = (portfolioData.holdings || portfolioData.portfolio || []).map(h => ({
-    ticker: h.ticker,
-    name: h.name || h.ticker,
-    allocation: (h.allocation !== undefined) ? h.allocation : (h.weight * 100)
-  }));
-  
-  // Convert time horizon from days to years if needed
-  const timeHorizon = portfolioData.timeHorizon > 50 
-    ? Math.round(portfolioData.timeHorizon / 252) 
-    : portfolioData.timeHorizon;
-  
-  if (!authToken) {
-    const saved = localStorage.getItem('portfoliopath_portfolios');
-    const portfolios = saved ? JSON.parse(saved) : [];
-    const newPortfolio = { 
-      id: `local_${Date.now()}`,
-      name: portfolioData.name,
-      data: {
-        portfolio: portfolioData.portfolio || portfolioData.holdings,
-        initialValue: portfolioData.initialValue || portfolioData.initialInvestment || 10000,
-        timeHorizon: portfolioData.timeHorizon || 252,
-        numSimulations: portfolioData.numSimulations || 1000,
-        advancedOptions: portfolioData.advancedOptions || {},
-        scenarios: portfolioData.scenarios || {}
-      },
-      savedAt: new Date().toISOString() 
-    };
-    portfolios.push(newPortfolio);
-    localStorage.setItem('portfoliopath_portfolios', JSON.stringify(portfolios));
-    return newPortfolio;
-  }
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolios`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      name: portfolioData.name,
-      description: portfolioData.description || '',
-      initial_investment: portfolioData.initialValue || portfolioData.initialInvestment || 10000,
-      monthly_contribution: portfolioData.monthlyContribution || 0,
-      time_horizon: timeHorizon || 10,
-      holdings: holdings,
-      simulation_config: {
-        numSimulations: portfolioData.numSimulations,
-        advancedOptions: portfolioData.advancedOptions,
-        scenarios: portfolioData.scenarios,
-        ...portfolioData.simulationConfig
-      }
-    }),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to save portfolio');
-  }
-  
-  return response.json();
-};
-
-export const loadPortfolios = async () => {
-  if (!authToken) {
-    const saved = localStorage.getItem('portfoliopath_portfolios');
-    return saved ? JSON.parse(saved) : [];
-  }
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolios`, {
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    if (response.status === 401) {
-      clearAuthToken();
-      const saved = localStorage.getItem('portfoliopath_portfolios');
-      return saved ? JSON.parse(saved) : [];
-    }
-    throw new Error('Failed to load portfolios');
-  }
-  
-  const apiPortfolios = await response.json();
-  
-  // Transform API response to match frontend expected format
-  return apiPortfolios.map(p => ({
-    id: p.id,
-    name: p.name,
-    data: {
-      portfolio: (p.holdings || []).map(h => ({
-        ticker: h.ticker,
-        weight: h.allocation / 100 // Convert from 0-100 to 0-1
-      })),
-      initialValue: p.initial_investment || 10000,
-      timeHorizon: (p.time_horizon || 10) * 252, // Convert years to days
-      numSimulations: p.simulation_config?.numSimulations || 1000,
-      advancedOptions: p.simulation_config?.advancedOptions || {},
-      scenarios: p.simulation_config?.scenarios || {}
-    },
-    createdAt: p.created_at
-  }));
-};
-
-export const getPortfolio = async (portfolioId) => {
-  if (!authToken) throw new Error('Not authenticated');
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolios/${portfolioId}`, {
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) throw new Error('Portfolio not found');
-  return response.json();
-};
-
-export const updatePortfolio = async (portfolioId, updates) => {
-  if (!authToken) throw new Error('Not authenticated');
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolios/${portfolioId}`, {
-    method: 'PUT',
-    headers: authHeaders(),
-    body: JSON.stringify(updates),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Failed to update portfolio');
-  }
-  
-  return response.json();
-};
-
-export const deletePortfolio = async (portfolioId) => {
-  if (!authToken || String(portfolioId).startsWith('local_')) {
-    const saved = localStorage.getItem('portfoliopath_portfolios');
-    if (saved) {
-      const portfolios = JSON.parse(saved);
-      const filtered = portfolios.filter(p => p.id !== portfolioId);
-      localStorage.setItem('portfoliopath_portfolios', JSON.stringify(filtered));
-    }
-    return;
-  }
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/portfolios/${portfolioId}`, {
-    method: 'DELETE',
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok && response.status !== 204) {
-    throw new Error('Failed to delete portfolio');
-  }
-};
-
-export const duplicatePortfolio = async (portfolioId, newName = null) => {
-  if (!authToken) throw new Error('Not authenticated');
-  
-  const url = new URL(`${API_CONFIG.BASE_URL}/api/portfolios/${portfolioId}/duplicate`);
-  if (newName) url.searchParams.set('new_name', newName);
-  
-  const response = await fetch(url.toString(), {
-    method: 'POST',
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) throw new Error('Failed to duplicate portfolio');
-  return response.json();
-};
-
-// ============================================================================
-// PAYMENT API FUNCTIONS
-// ============================================================================
-
-/**
- * Get payment configuration (Stripe publishable key, products)
- */
-export const getPaymentConfig = async () => {
-  try {
-    const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/config`, {
-      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-    });
-    
-    if (!response.ok) {
-      if (response.status === 503) {
-        return { available: false, products: [] };
-      }
-      throw new Error('Failed to load payment configuration');
-    }
-    
-    const config = await response.json();
-    return { 
-      available: !!config.publishable_key,
-      ...config 
-    };
-  } catch (error) {
-    console.error('Payment config error:', error);
-    return { available: false, products: [] };
-  }
-};
-
-/**
- * Create a Stripe checkout session
- * @param {string} priceId - Stripe Price ID
- */
-export const createCheckoutSession = async (priceId) => {
-  if (!authToken) throw new Error('Please sign in to purchase');
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/create-checkout-session`, {
-    method: 'POST',
-    headers: {
-      ...authHeaders(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ price_id: priceId }),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to create checkout session');
-  }
-  
-  return response.json();
-};
-
-/**
- * Get user's payment/premium status
- */
-export const getPaymentStatus = async () => {
-  if (!authToken) return { is_premium: false };
-  
-  try {
-    const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/status`, {
-      headers: authHeaders(),
-      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-    });
-    
-    if (!response.ok) {
-      return { is_premium: false };
-    }
-    
-    return response.json();
-  } catch {
-    return { is_premium: false };
-  }
-};
-
-/**
- * Verify a checkout session after payment redirect
- * @param {string} sessionId - Stripe Session ID from URL
- */
-export const verifyPaymentSession = async (sessionId) => {
-  if (!authToken) throw new Error('Please sign in to verify payment');
-  
-  const response = await fetch(`${API_CONFIG.BASE_URL}/api/payments/verify-session?session_id=${sessionId}`, {
-    method: 'POST',
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to verify payment');
-  }
-  
-  return response.json();
-};
-
-// ============================================================================
-// UTILITY FUNCTIONS
+// HEALTH CHECK
 // ============================================================================
 
 export const checkApiHealth = async () => {
@@ -689,35 +28,83 @@ export const checkApiHealth = async () => {
   }
 };
 
-export const getApiConfig = () => ({
-  baseUrl: API_CONFIG.BASE_URL,
-  timeout: API_CONFIG.TIMEOUT,
-  isConnected: true
-});
+// ============================================================================
+// STOCK DATA
+// ============================================================================
+
+export const getStockData = async (ticker, period = '1y') => {
+  const response = await fetch(
+    `${API_CONFIG.BASE_URL}/api/stocks/${ticker}?period=${period}`,
+    { signal: AbortSignal.timeout(API_CONFIG.TIMEOUT) }
+  );
+  if (!response.ok) throw new Error(`Failed to fetch ${ticker}`);
+  return response.json();
+};
+
+export const validateTicker = async (ticker) => {
+  try {
+    const response = await fetch(
+      `${API_CONFIG.BASE_URL}/api/stocks/${ticker}/validate`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!response.ok) return { valid: false, ticker: ticker.toUpperCase() };
+    return response.json();
+  } catch {
+    return { valid: false, ticker: ticker.toUpperCase() };
+  }
+};
+
+export const getBatchStockData = async (tickers, period = '1y') => {
+  const response = await fetch(`${API_CONFIG.BASE_URL}/api/stocks/batch`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify(tickers),
+    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT)
+  });
+  if (!response.ok) throw new Error('Failed to fetch batch stock data');
+  return response.json();
+};
+
+// ============================================================================
+// SIMULATION
+// ============================================================================
+
+export const runSimulation = async (config) => {
+  const response = await fetch(`${API_CONFIG.BASE_URL}/api/simulate`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      tickers: config.tickers,
+      weights: config.weights,
+      initial_value: config.initialValue || config.initial_value || 10000,
+      time_horizon: config.timeHorizon || config.time_horizon || 252,
+      num_simulations: config.numSimulations || config.num_simulations || 1000,
+      use_garch: config.useGARCH || config.use_garch || false,
+      use_regime_switching: config.useRegimeSwitching || config.use_regime_switching || false,
+      use_jump_diffusion: config.useJumpDiffusion || config.use_jump_diffusion || false,
+      monthly_contribution: config.monthlyContribution || config.monthly_contribution || 0,
+    }),
+    signal: AbortSignal.timeout(60000) // 60s for simulations
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Simulation failed' }));
+    throw new Error(error.detail || 'Simulation failed');
+  }
+  
+  return response.json();
+};
 
 // ============================================================================
 // DEFAULT EXPORT
 // ============================================================================
 
-export default {
-  // Auth
-  registerUser, loginUser, logoutUser, getCurrentUser, isAuthenticated,
-  setAuthToken, getAuthToken, clearAuthToken,
-  
-  // Stock Data
-  fetchStockQuote, fetchBatchQuotes, fetchHistoricalData, fetchAssetParameters,
-  validateTicker, searchTickers, fetchCorrelationMatrix,
-  
-  // Simulation
-  runSimulation, comparePortfolios, generateEfficientFrontier, calculateGoalProbability,
-  getSimulationUsage,
-  
-  // Portfolios
-  savePortfolio, loadPortfolios, getPortfolio, updatePortfolio, deletePortfolio, duplicatePortfolio,
-  
-  // Payments
-  getPaymentConfig, createCheckoutSession, getPaymentStatus, verifyPaymentSession,
-  
-  // Utility
-  checkApiHealth, getApiConfig
+const api = {
+  checkApiHealth,
+  getStockData,
+  validateTicker,
+  getBatchStockData,
+  runSimulation,
 };
+
+export default api;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Check, X, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
-import { validateTicker, fetchStockQuote } from '../services/api';
+import { validateTicker, getStockData } from '../services/api';
 
 // Fallback stock database for offline mode
 const STOCK_DATABASE = {
@@ -115,13 +115,13 @@ const fetchTickerInfo = async (ticker) => {
     if (isValid) {
       // Fetch real quote from backend
       try {
-        const quote = await fetchStockQuote(upperTicker);
-        if (quote && quote.price) {
+        const quote = await getStockData(upperTicker);
+        if (quote && quote.current_price) {
           return {
             valid: true,
             name: quote.name || quote.longName || upperTicker,
-            price: quote.price,
-            change: quote.changePercent || 0,
+            price: quote.current_price,
+            change: quote.change_percent || 0,
             sector: quote.sector || 'Unknown'
           };
         }

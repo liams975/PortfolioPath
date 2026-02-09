@@ -1,12 +1,7 @@
 import PortfolioPath from './PortfolioPath'
-import AuthGate from './components/AuthGate'
 
 function App() {
-  return (
-    <AuthGate>
-      <PortfolioPath />
-    </AuthGate>
-  )
+  return <PortfolioPath />
 }
 
 export default App

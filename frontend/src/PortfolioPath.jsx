@@ -1,15 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
-import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package, Crown, Star } from 'lucide-react';
-import { useAuth } from './context/AuthContext';
+import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
-import { usePremium } from './context/PremiumContext';
-import AuthModal from './components/AuthModal';
-import PaymentModal from './components/PaymentModal';
-import AccountSettings from './components/AccountSettings';
 import OnboardingTutorial, { useTutorial } from './components/OnboardingTutorial';
-import SavedPortfolios from './components/SavedPortfolios';
 import { TickerInput } from './components/TickerInput';
 import { exportToCSV, exportToPDF } from './utils/exportUtils';
 import { cacheSimulationResults } from './services/cache';
@@ -106,26 +100,8 @@ const PortfolioPath = () => {
   const theme = useTheme();
   const { isDark, toggleTheme, colors } = theme;
   
-  // Auth state
-  const { user, logout, isAuthenticated } = useAuth();
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showSavedPortfolios, setShowSavedPortfolios] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showAccountSettings, setShowAccountSettings] = useState(false);
-  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
-  
-  // Onboarding tutorial - pass user.id to track per-user tutorial completion
-  const { showTutorial, startTutorial: _startTutorial, closeTutorial } = useTutorial(user?.id);
-  
-  // Premium/Pro tier status
-  const { 
-    isPremium, 
-    hasFeature: _hasFeature, 
-    canRunSimulation, 
-    trackSimulation,
-    dailySimulations,
-    FREE_SIMULATION_LIMIT 
-  } = usePremium();
+  // Onboarding tutorial - use localStorage for demo
+  const { showTutorial, startTutorial: _startTutorial, closeTutorial } = useTutorial('demo-user');
 
   // Real market data hooks - fetch live parameters from Yahoo Finance
   const { 
@@ -268,24 +244,6 @@ const PortfolioPath = () => {
     
     if (Math.abs(totalWeight - 1) > 0.01) {
       toast.error(`Portfolio weights must sum to 100% (currently ${(totalWeight * 100).toFixed(1)}%)`);
-      return;
-    }
-    
-    // Check simulation limit for free users
-    const simLimit = canRunSimulation();
-    if (!simLimit.allowed) {
-      toast.error(
-        `Daily simulation limit reached (${FREE_SIMULATION_LIMIT}/${FREE_SIMULATION_LIMIT}). Upgrade to Pro for unlimited simulations!`,
-        { duration: 5000 }
-      );
-      setShowPaymentModal(true);
-      return;
-    }
-    
-    // Track simulation usage
-    if (!trackSimulation()) {
-      toast.warning('Simulation limit reached. Upgrade to Pro for unlimited access.');
-      setShowPaymentModal(true);
       return;
     }
     
@@ -766,13 +724,6 @@ const PortfolioPath = () => {
           {/* Header */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">
-              {/* Pro Badge - only show when authenticated and premium */}
-              {isAuthenticated && isPremium && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg">
-                  <Crown className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-semibold text-amber-400">PRO</span>
-                </div>
-              )}
             </div>
             <div className="flex items-center gap-2">
               {/* Comparison Mode Toggle */}
@@ -785,123 +736,14 @@ const PortfolioPath = () => {
                 <span className={comparisonMode ? 'text-white' : colors.textMuted}>Compare</span>
               </button>
               
-              {isAuthenticated ? (
-                <>
-                  <button
-                    onClick={() => setShowSavedPortfolios(!showSavedPortfolios)}
-                    className={`px-4 py-2 ${colors.card} rounded-lg transition-all border flex items-center gap-2 text-sm`}
-                  >
-                    <FolderOpen className={`w-4 h-4 ${colors.accent}`} />
-                    <span className={colors.textMuted}>Portfolios</span>
-                  </button>
-                  
-                  {/* Profile Button with Dropdown */}
-                  <div className="relative">
-                    <button 
-                      onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                      className={`flex items-center gap-2 px-4 py-2 ${colors.card} rounded-lg border ${showProfileDropdown ? 'border-rose-500/50' : ''} hover:border-rose-500/50 transition-all cursor-pointer`}
-                    >
-                      <User className={`w-4 h-4 ${colors.accent}`} />
-                      <span className={`text-sm ${colors.textMuted}`}>{user?.full_name || user?.username || user?.email?.split('@')[0] || 'Profile'}</span>
-                    </button>
-                    
-                    {/* Profile Dropdown */}
-                    {showProfileDropdown && (
-                      <>
-                        {/* Backdrop to close dropdown */}
-                        <div 
-                          className="fixed inset-0 z-40" 
-                          onClick={() => setShowProfileDropdown(false)}
-                        />
-                        <div className={`absolute right-0 top-full mt-2 w-64 ${colors.card} ${colors.border} border rounded-xl shadow-2xl z-50 overflow-hidden`}>
-                          {/* User Info Header */}
-                          <div className={`p-4 border-b ${colors.border} ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'}`}>
-                            <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center text-white font-semibold`}>
-                                {(user?.full_name || user?.username || user?.email || 'U')[0].toUpperCase()}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className={`font-medium ${colors.text} truncate`}>
-                                  {user?.full_name || user?.username || 'User'}
-                                </p>
-                                <p className={`text-xs ${colors.textMuted} truncate`}>
-                                  {user?.email}
-                                </p>
-                              </div>
-                            </div>
-                            {isPremium && (
-                              <div className="mt-2 flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg w-fit">
-                                <Crown className="w-3 h-3 text-amber-400" />
-                                <span className="text-xs font-semibold text-amber-400">PRO Member</span>
-                              </div>
-                            )}
-                          </div>
-                          
-                          {/* Menu Items */}
-                          <div className="p-2">
-                            <button
-                              onClick={() => {
-                                setShowProfileDropdown(false);
-                                setShowAccountSettings(true);
-                              }}
-                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
-                            >
-                              <Settings className={`w-4 h-4 ${colors.textMuted}`} />
-                              <span className={`text-sm ${colors.text}`}>Settings</span>
-                            </button>
-                            
-                            <button
-                              onClick={() => {
-                                setShowProfileDropdown(false);
-                                toggleTheme();
-                              }}
-                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
-                            >
-                              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
-                              <span className={`text-sm ${colors.text}`}>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
-                            </button>
-                            
-                            {!isPremium && (
-                              <button
-                                onClick={() => {
-                                  setShowProfileDropdown(false);
-                                  setShowPaymentModal(true);
-                                }}
-                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
-                              >
-                                <Star className="w-4 h-4 text-rose-400" />
-                                <span className={`text-sm ${colors.text}`}>Upgrade to Pro</span>
-                              </button>
-                            )}
-                          </div>
-                          
-                          {/* Logout */}
-                          <div className={`p-2 border-t ${colors.border}`}>
-                            <button
-                              onClick={() => {
-                                setShowProfileDropdown(false);
-                                logout();
-                              }}
-                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-red-500/10 transition-all text-left`}
-                            >
-                              <LogOut className="w-4 h-4 text-red-400" />
-                              <span className="text-sm text-red-400">Log Out</span>
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <button
-                  onClick={() => setShowAuthModal(true)}
-                  className={`px-5 py-2 ${colors.button} rounded-lg transition-all duration-200 font-medium flex items-center gap-2 text-sm shadow-lg shadow-rose-900/30 text-white`}
-                >
-                  <User className="w-4 h-4" />
-                  Sign In
-                </button>
-              )}
+              {/* Theme Toggle */}
+              <button
+                onClick={toggleTheme}
+                className={`px-4 py-2 ${colors.card} rounded-lg transition-all border flex items-center gap-2 text-sm`}
+              >
+                {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+                <span className={colors.textMuted}>{isDark ? 'Light' : 'Dark'}</span>
+              </button>
             </div>
           </div>
 
@@ -914,15 +756,6 @@ const PortfolioPath = () => {
               Monte Carlo Simulation Engine • Quantitative Risk Analytics
             </p>
           </div>
-
-          {/* Saved Portfolios Panel */}
-          {showSavedPortfolios && isAuthenticated && (
-            <SavedPortfolios
-              onLoadPortfolio={loadPortfolio}
-              currentPortfolio={getCurrentPortfolioData()}
-              onClose={() => setShowSavedPortfolios(false)}
-            />
-          )}
 
           {/* Preset Portfolio Templates */}
           <div data-tour="presets" className={`mb-4 ${colors.card} rounded-xl p-4 border`}>
@@ -1288,25 +1121,6 @@ const PortfolioPath = () => {
             </div>
           </div>
 
-          {/* Simulation Limit Indicator (Free Users) */}
-          {!isPremium && isAuthenticated && (
-            <div className={`mt-4 p-3 ${colors.card} rounded-lg border flex items-center justify-between`}>
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-rose-400" />
-                <span className={`text-sm ${colors.textMuted}`}>
-                  Daily Simulations: {dailySimulations}/{FREE_SIMULATION_LIMIT}
-                </span>
-              </div>
-              <button
-                onClick={() => setShowPaymentModal(true)}
-                className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1"
-              >
-                <Star className="w-3 h-3" />
-                Get Unlimited
-              </button>
-            </div>
-          )}
-
           {/* Run Simulation Button */}
           <button
             onClick={runSimulation}
@@ -1341,25 +1155,12 @@ const PortfolioPath = () => {
           )}
         </div>
         
-        {/* Auth Modal */}
-        <AuthModal 
-          isOpen={showAuthModal} 
-          onClose={() => setShowAuthModal(false)}
-        />
-        
-        {/* Payment Modal */}
-        <PaymentModal 
-          isOpen={showPaymentModal} 
-          onClose={() => setShowPaymentModal(false)}
-          isDark={isDark}
-        />
-        
         {/* Onboarding Tutorial */}
         <OnboardingTutorial
           isOpen={showTutorial}
           onClose={closeTutorial}
           isDark={isDark}
-          userId={user?.id}
+          userId={'demo-user'}
         />
       </div>
     );
@@ -2099,28 +1900,6 @@ const PortfolioPath = () => {
 
   return (
     <>
-      {/* Auth Modal */}
-      <AuthModal 
-        isOpen={showAuthModal} 
-        onClose={() => setShowAuthModal(false)}
-      />
-      
-      {/* Payment Modal */}
-      <PaymentModal 
-        isOpen={showPaymentModal} 
-        onClose={() => setShowPaymentModal(false)}
-        isDark={isDark}
-      />
-      
-      {/* Account Settings Modal */}
-      <AccountSettings 
-        isOpen={showAccountSettings} 
-        onClose={() => setShowAccountSettings(false)}
-        onUpgrade={() => {
-          setShowAccountSettings(false);
-          setShowPaymentModal(true);
-        }}
-      />
     </>
   );
 };

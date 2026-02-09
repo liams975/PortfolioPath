@@ -1,30 +1,19 @@
 """
-PortfolioPath API - Vercel Serverless Version
-Uses in-memory storage (resets on cold start) for demo purposes.
-For production, use a proper database like PostgreSQL on Supabase/Neon.
+PortfolioPath API - Vercel Serverless (Demo Version)
+No authentication - pure stock data and simulation API
 """
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
-import bcrypt
+from pydantic import BaseModel
+from typing import List, Optional
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import json
-
-# ============ Configuration ============
-SECRET_KEY = "portfoliopath-secret-key-change-in-production-2024"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
 app = FastAPI(
     title="PortfolioPath API",
-    description="Monte Carlo Portfolio Simulation Backend",
-    version="1.0.0"
+    description="Monte Carlo Portfolio Simulation - Demo API",
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -35,49 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-security = HTTPBearer(auto_error=False)
-
-# ============ In-Memory Storage ============
-users_db: Dict[str, dict] = {}
-portfolios_db: Dict[int, List[dict]] = {}  # user_id -> list of portfolios
-user_id_counter = 1
-
 # ============ Models ============
-class UserRegister(BaseModel):
-    email: EmailStr
-    username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., min_length=8)
-    full_name: Optional[str] = None
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-
-class UserResponse(BaseModel):
-    id: int
-    email: str
-    username: str
-    full_name: Optional[str]
-    is_active: bool = True
-    is_verified: bool = True
-    created_at: str
-    last_login: Optional[str] = None
-
-class PortfolioCreate(BaseModel):
-    name: str
-    description: Optional[str] = ""
-    initial_investment: float = 10000
-    monthly_contribution: float = 0
-    time_horizon: int = 10
-    holdings: List[dict] = []
-    simulation_config: Optional[dict] = None
-
 class SimulationRequest(BaseModel):
     tickers: List[str]
     weights: List[float]
@@ -89,40 +36,10 @@ class SimulationRequest(BaseModel):
     use_jump_diffusion: bool = False
     monthly_contribution: float = 0
 
-# ============ Auth Helpers ============
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
-
-def create_token(user_id: int, email: str, expires_delta: timedelta) -> str:
-    expire = datetime.utcnow() + expires_delta
-    payload = {"sub": str(user_id), "email": email, "exp": expire}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
-def decode_token(token: str) -> Optional[dict]:
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
-        return None
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if not credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    payload = decode_token(credentials.credentials)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    email = payload.get("email")
-    if email not in users_db:
-        raise HTTPException(status_code=401, detail="User not found")
-    return users_db[email]
-
 # ============ Health Endpoints ============
 @app.get("/")
 def root():
-    return {"name": "PortfolioPath API", "version": "1.0.0", "status": "running"}
+    return {"name": "PortfolioPath API", "version": "2.0.0", "status": "running"}
 
 @app.get("/health")
 def health():
@@ -130,128 +47,7 @@ def health():
 
 @app.get("/api/health")
 def api_health():
-    return {"status": "healthy", "database": "in-memory", "version": "1.0.0"}
-
-# ============ Auth Endpoints ============
-@app.post("/api/auth/register", response_model=TokenResponse)
-def register(user: UserRegister):
-    global user_id_counter
-    if user.email in users_db:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    user_data = {
-        "id": user_id_counter,
-        "email": user.email,
-        "username": user.username,
-        "full_name": user.full_name,
-        "password_hash": hash_password(user.password),
-        "created_at": datetime.utcnow().isoformat(),
-        "is_active": True,
-        "is_verified": True
-    }
-    users_db[user.email] = user_data
-    portfolios_db[user_id_counter] = []
-    user_id_counter += 1
-    
-    access_token = create_token(user_data["id"], user.email, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    refresh_token = create_token(user_data["id"], user.email, timedelta(days=7))
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-
-@app.post("/api/auth/login", response_model=TokenResponse)
-def login(credentials: UserLogin):
-    user = users_db.get(credentials.email)
-    if not user or not verify_password(credentials.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    access_token = create_token(user["id"], credentials.email, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    refresh_token = create_token(user["id"], credentials.email, timedelta(days=7))
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-
-@app.get("/api/auth/me", response_model=UserResponse)
-def get_me(current_user: dict = Depends(get_current_user)):
-    return UserResponse(
-        id=current_user["id"],
-        email=current_user["email"],
-        username=current_user["username"],
-        full_name=current_user.get("full_name"),
-        is_active=True,
-        is_verified=True,
-        created_at=current_user["created_at"]
-    )
-
-@app.post("/api/auth/logout")
-def logout():
-    return {"message": "Logged out successfully"}
-
-# ============ Portfolio Endpoints ============
-@app.get("/api/portfolios")
-def list_portfolios(current_user: dict = Depends(get_current_user)):
-    user_portfolios = portfolios_db.get(current_user["id"], [])
-    return [
-        {
-            "id": p["id"],
-            "name": p["name"],
-            "description": p.get("description", ""),
-            "holdings_count": len(p.get("holdings", [])),
-            "total_allocation": sum(h.get("allocation", 0) for h in p.get("holdings", [])),
-            "created_at": p.get("created_at", "")
-        }
-        for p in user_portfolios
-    ]
-
-@app.post("/api/portfolios", status_code=201)
-def create_portfolio(portfolio: PortfolioCreate, current_user: dict = Depends(get_current_user)):
-    user_id = current_user["id"]
-    if user_id not in portfolios_db:
-        portfolios_db[user_id] = []
-    
-    portfolio_id = len(portfolios_db[user_id]) + 1
-    portfolio_data = {
-        "id": portfolio_id,
-        "name": portfolio.name,
-        "description": portfolio.description,
-        "initial_investment": portfolio.initial_investment,
-        "monthly_contribution": portfolio.monthly_contribution,
-        "time_horizon": portfolio.time_horizon,
-        "holdings": portfolio.holdings,
-        "simulation_config": portfolio.simulation_config or {},
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat()
-    }
-    portfolios_db[user_id].append(portfolio_data)
-    
-    return {
-        "id": portfolio_id,
-        "name": portfolio.name,
-        "description": portfolio.description,
-        "initial_investment": portfolio.initial_investment,
-        "monthly_contribution": portfolio.monthly_contribution,
-        "time_horizon": portfolio.time_horizon,
-        "simulation_config": portfolio.simulation_config,
-        "holdings": portfolio.holdings,
-        "total_allocation": sum(h.get("allocation", 0) for h in portfolio.holdings),
-        "created_at": portfolio_data["created_at"],
-        "updated_at": portfolio_data["updated_at"]
-    }
-
-@app.delete("/api/portfolios/{portfolio_id}", status_code=204)
-def delete_portfolio(portfolio_id: int, current_user: dict = Depends(get_current_user)):
-    user_id = current_user["id"]
-    user_portfolios = portfolios_db.get(user_id, [])
-    portfolios_db[user_id] = [p for p in user_portfolios if p["id"] != portfolio_id]
-    return None
+    return {"status": "healthy", "version": "2.0.0"}
 
 # ============ Stock Data Endpoints ============
 @app.get("/api/stocks/{ticker}")
@@ -268,34 +64,17 @@ def get_stock_data(ticker: str, period: str = "1y"):
             "name": info.get("longName", info.get("shortName", ticker)),
             "current_price": float(hist["Close"].iloc[-1]),
             "currency": info.get("currency", "USD"),
-            "exchange": info.get("exchange", ""),
             "sector": info.get("sector", ""),
             "industry": info.get("industry", ""),
-            "market_cap": info.get("marketCap"),
             "history": {
                 "dates": hist.index.strftime("%Y-%m-%d").tolist(),
                 "close": hist["Close"].tolist(),
-                "volume": hist["Volume"].tolist()
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/api/stocks/batch")
-def get_batch_stock_data(tickers: List[str], period: str = "1y"):
-    results = {}
-    for ticker in tickers[:10]:  # Limit to 10
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period=period)
-            if not hist.empty:
-                results[ticker.upper()] = {
-                    "current_price": float(hist["Close"].iloc[-1]),
-                    "returns": hist["Close"].pct_change().dropna().tolist()
-                }
-        except:
-            pass
-    return results
 
 @app.get("/api/stocks/{ticker}/validate")
 def validate_ticker(ticker: str):
@@ -314,19 +93,38 @@ def validate_ticker(ticker: str):
     except:
         return {"valid": False, "ticker": ticker.upper()}
 
+@app.post("/api/stocks/batch")
+def get_batch_stock_data(tickers: List[str], period: str = "1y"):
+    results = {}
+    for ticker in tickers[:10]:  # Limit to 10
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period=period)
+            if not hist.empty:
+                results[ticker.upper()] = {
+                    "current_price": float(hist["Close"].iloc[-1]),
+                    "returns": hist["Close"].pct_change().dropna().tolist()
+                }
+        except:
+            pass
+    return results
+
 # ============ Simulation Endpoint ============
 @app.post("/api/simulate")
 def run_simulation(request: SimulationRequest):
     try:
-        # Fetch historical data
         tickers = [t.upper() for t in request.tickers]
         data = {}
         
+        # Fetch historical data
         for ticker in tickers:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="2y")
-            if not hist.empty:
-                data[ticker] = hist["Close"].pct_change().dropna()
+            try:
+                stock = yf.Ticker(ticker)
+                hist = stock.history(period="2y")
+                if not hist.empty:
+                    data[ticker] = hist["Close"].pct_change().dropna()
+            except:
+                pass
         
         if not data:
             raise HTTPException(status_code=400, detail="Could not fetch data for any tickers")
@@ -356,7 +154,9 @@ def run_simulation(request: SimulationRequest):
         for t in range(1, num_steps + 1):
             z = np.random.standard_normal(num_sims)
             paths[:, t] = paths[:, t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * z)
-            paths[:, t] += request.monthly_contribution * (t // 21)  # Monthly contribution
+            # Add monthly contribution every 21 trading days
+            if request.monthly_contribution > 0 and t % 21 == 0:
+                paths[:, t] += request.monthly_contribution
         
         # Calculate percentiles
         percentiles = [5, 10, 25, 50, 75, 90, 95]

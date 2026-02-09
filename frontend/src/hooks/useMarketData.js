@@ -6,8 +6,36 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { fetchAssetParameters, fetchBatchQuotes, fetchCorrelationMatrix } from '../services/api';
+import { getStockData, getBatchStockData } from '../services/api';
 import { assetDatabase } from '../constants/portfolioConstants';
+
+// Helper to convert stock data to asset parameters
+const toAssetParams = (stockData) => ({
+  mean: 0.0003, // Default daily return
+  vol: 0.015,   // Default daily vol
+  name: stockData.name || stockData.ticker,
+  price: stockData.current_price,
+  sector: stockData.sector,
+});
+
+// Helper: fetch parameters for a single ticker
+const fetchAssetParameters = async (ticker) => {
+  const data = await getStockData(ticker);
+  return toAssetParams(data);
+};
+
+// Helper: fetch batch quotes
+const fetchBatchQuotes = async (tickers) => {
+  return getBatchStockData(tickers);
+};
+
+// Helper: fetch correlation matrix (not available in simplified API, return identity)
+const fetchCorrelationMatrix = async (tickers) => {
+  const n = tickers.length;
+  return Array(n).fill(0).map((_, i) =>
+    Array(n).fill(0).map((_, j) => i === j ? 1 : 0.3)
+  );
+};
 
 // In-memory cache for market data
 const marketDataCache = new Map();
