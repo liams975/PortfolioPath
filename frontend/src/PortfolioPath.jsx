@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
-import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Target, Activity, Settings, BarChart3, Network, Zap, User, LogOut, FolderOpen, Sun, Moon, Download, GitCompare, Sliders, Scale, Crosshair, TrendingDown, Loader2, Package, Crown, Star } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import OnboardingTutorial, { useTutorial } from './components/OnboardingTutorial';
+import SavedPortfolios from './components/SavedPortfolios';
 import { TickerInput } from './components/TickerInput';
 import { exportToCSV, exportToPDF } from './utils/exportUtils';
 import { cacheSimulationResults } from './services/cache';
@@ -99,6 +100,10 @@ const PortfolioPath = () => {
   // Theme
   const theme = useTheme();
   const { isDark, toggleTheme, colors } = theme;
+  
+  // Demo user state (replaces auth)
+  const [showSavedPortfolios, setShowSavedPortfolios] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   
   // Onboarding tutorial - use localStorage for demo
   const { showTutorial, startTutorial: _startTutorial, closeTutorial } = useTutorial('demo-user');
@@ -724,6 +729,11 @@ const PortfolioPath = () => {
           {/* Header */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-3">
+              {/* Pro Badge */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg">
+                <Crown className="w-4 h-4 text-amber-400" />
+                <span className="text-xs font-semibold text-amber-400">PRO</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               {/* Comparison Mode Toggle */}
@@ -736,14 +746,83 @@ const PortfolioPath = () => {
                 <span className={comparisonMode ? 'text-white' : colors.textMuted}>Compare</span>
               </button>
               
-              {/* Theme Toggle */}
+              {/* Saved Portfolios Button */}
               <button
-                onClick={toggleTheme}
+                onClick={() => setShowSavedPortfolios(!showSavedPortfolios)}
                 className={`px-4 py-2 ${colors.card} rounded-lg transition-all border flex items-center gap-2 text-sm`}
               >
-                {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
-                <span className={colors.textMuted}>{isDark ? 'Light' : 'Dark'}</span>
+                <FolderOpen className={`w-4 h-4 ${colors.accent}`} />
+                <span className={colors.textMuted}>Portfolios</span>
               </button>
+              
+              {/* Profile Button with Dropdown */}
+              <div className="relative">
+                <button 
+                  onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                  className={`flex items-center gap-2 px-4 py-2 ${colors.card} rounded-lg border ${showProfileDropdown ? 'border-rose-500/50' : ''} hover:border-rose-500/50 transition-all cursor-pointer`}
+                >
+                  <User className={`w-4 h-4 ${colors.accent}`} />
+                  <span className={`text-sm ${colors.textMuted}`}>Demo User</span>
+                </button>
+                
+                {/* Profile Dropdown */}
+                {showProfileDropdown && (
+                  <>
+                    {/* Backdrop to close dropdown */}
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowProfileDropdown(false)}
+                    />
+                    <div className={`absolute right-0 top-full mt-2 w-64 ${colors.card} ${colors.border} border rounded-xl shadow-2xl z-50 overflow-hidden`}>
+                      {/* User Info Header */}
+                      <div className={`p-4 border-b ${colors.border} ${isDark ? 'bg-zinc-800/50' : 'bg-gray-50'}`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center text-white font-semibold`}>
+                            D
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-medium ${colors.text} truncate`}>
+                              Demo User
+                            </p>
+                            <p className={`text-xs ${colors.textMuted} truncate`}>
+                              demo@portfoliopath.com
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-lg w-fit">
+                          <Crown className="w-3 h-3 text-amber-400" />
+                          <span className="text-xs font-semibold text-amber-400">PRO Member</span>
+                        </div>
+                      </div>
+                      
+                      {/* Menu Items */}
+                      <div className="p-2">
+                        <button
+                          onClick={() => {
+                            setShowProfileDropdown(false);
+                            toggleTheme();
+                          }}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
+                        >
+                          {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+                          <span className={`text-sm ${colors.text}`}>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+                        </button>
+                        
+                        <button
+                          onClick={() => {
+                            setShowProfileDropdown(false);
+                            setShowSavedPortfolios(true);
+                          }}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-gray-100'} transition-all text-left`}
+                        >
+                          <FolderOpen className={`w-4 h-4 ${colors.textMuted}`} />
+                          <span className={`text-sm ${colors.text}`}>Saved Portfolios</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -756,6 +835,15 @@ const PortfolioPath = () => {
               Monte Carlo Simulation Engine • Quantitative Risk Analytics
             </p>
           </div>
+
+          {/* Saved Portfolios Panel */}
+          {showSavedPortfolios && (
+            <SavedPortfolios
+              onLoadPortfolio={loadPortfolio}
+              currentPortfolio={getCurrentPortfolioData()}
+              onClose={() => setShowSavedPortfolios(false)}
+            />
+          )}
 
           {/* Preset Portfolio Templates */}
           <div data-tour="presets" className={`mb-4 ${colors.card} rounded-xl p-4 border`}>
@@ -1120,6 +1208,42 @@ const PortfolioPath = () => {
               </div>
             </div>
           </div>
+
+          {/* Allocation Warnings */}
+          {(() => {
+            const validPositions = portfolio.filter(p => p.ticker && p.ticker.trim().length > 0 && p.weight > 0);
+            const hasNoAssets = validPositions.length === 0;
+            const allocationOff = Math.abs(totalWeight - 1) > 0.01;
+            const hasInvalidTickers = portfolio.some(p => p.ticker && !/^[A-Za-z0-9.-]*$/.test(p.ticker.trim()));
+            
+            if (hasNoAssets || allocationOff || hasInvalidTickers) {
+              return (
+                <div className={`mt-4 p-3 ${isDark ? 'bg-red-900/20 border-red-800/40' : 'bg-red-50 border-red-200'} rounded-lg border`}>
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      {hasNoAssets && (
+                        <p className="text-sm text-red-400">Add at least one asset with a weight greater than 0% to run a simulation.</p>
+                      )}
+                      {allocationOff && !hasNoAssets && (
+                        <p className="text-sm text-red-400">
+                          Portfolio allocation must equal 100% — currently at {(totalWeight * 100).toFixed(1)}%.
+                          {totalWeight > 1 
+                            ? ` Reduce allocation by ${((totalWeight - 1) * 100).toFixed(1)}%.` 
+                            : ` Increase allocation by ${((1 - totalWeight) * 100).toFixed(1)}%.`
+                          }
+                        </p>
+                      )}
+                      {hasInvalidTickers && (
+                        <p className="text-sm text-red-400">One or more tickers contain invalid characters. Tickers can only contain letters, numbers, dots, and hyphens.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           {/* Run Simulation Button */}
           <button
